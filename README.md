@@ -1,4 +1,4 @@
-# Stream Assist CC
+# Omni-Assist
 
 # NOTE: I make changes to this frequently that may break things! Use at your own risk.
 

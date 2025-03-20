@@ -33,9 +33,28 @@ async def async_setup_entry(
 
 class OmniAssistSensor(SensorEntity):
     _attr_native_value = STATE_IDLE
+    _attr_has_entity_name = True
+    
+    # Define the order mapping for sensors - this controls display order
+    SENSOR_ORDER = {
+        "wake": 1,
+        "stt": 2,
+        "intent": 3,
+        "tts": 4
+    }
 
     def __init__(self, config_entry: ConfigEntry, key: str):
+        # First call the standard init function
         init_entity(self, key, config_entry)
+        
+        # Set the sorting order to match the processing sequence
+        order_num = self.SENSOR_ORDER.get(key, 9)
+        
+        # Simply prepend a number to the name to control sort order
+        self._attr_name = f"{order_num} {key.upper()}"
+        
+        # Override the icon to match our custom ordering
+        self._attr_icon = f"mdi:numeric-{order_num}"
 
     async def async_added_to_hass(self) -> None:
         remove = async_dispatcher_connect(self.hass, self.unique_id, self.signal)

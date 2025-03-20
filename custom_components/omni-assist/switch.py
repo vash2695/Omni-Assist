@@ -5,12 +5,13 @@ from typing import Callable
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import STATE_IDLE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .core import run_forever, init_entity
-from .core.state_machine import EVENTS
+from .core.state_machine import EVENTS, PipelineState
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -76,10 +77,10 @@ class OmniAssistSwitch(SwitchEntity):
             _LOGGER.debug(f"Dispatching initial state for: {self.uid}-{event}")
             if event == "wake":
                 # Wake entity should show "start" when mic is on but pipeline isn't active
-                async_dispatcher_send(self.hass, f"{self.uid}-{event}", "start")
+                async_dispatcher_send(self.hass, f"{self.uid}-{event}", PipelineState.START.value)
             else:
                 # Other entities remain idle
-                async_dispatcher_send(self.hass, f"{self.uid}-{event}", None)
+                async_dispatcher_send(self.hass, f"{self.uid}-{event}", STATE_IDLE)
 
         try:
             _LOGGER.debug("Starting continuous pipeline processing")
@@ -109,7 +110,7 @@ class OmniAssistSwitch(SwitchEntity):
         # Reset all sensor entities to IDLE state when switch is off
         for event in EVENTS:
             _LOGGER.debug(f"Resetting entity state for: {self.uid}-{event}")
-            async_dispatcher_send(self.hass, f"{self.uid}-{event}", None)
+            async_dispatcher_send(self.hass, f"{self.uid}-{event}", STATE_IDLE)
 
         if self.on_close is not None:
             try:

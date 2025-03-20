@@ -67,6 +67,7 @@ class OmniAssistStateMachine:
             self.states[event_type] = state
             
         # Dispatch state update to any listeners
+        # Always send the enum value for consistent handling
         state_value = state.value if state != PipelineState.IDLE else STATE_IDLE
         self.hass.loop.call_soon_threadsafe(
             async_dispatcher_send, 

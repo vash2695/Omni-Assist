@@ -9,7 +9,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .core import init_entity
-from .core.state_machine import EVENTS
+from .core.state_machine import EVENTS, PipelineState
 
 
 async def async_setup_entry(
@@ -51,6 +51,15 @@ class OmniAssistSensor(SensorEntity):
         "tts": 4
     }
 
+    # Define friendly names for the pipeline states
+    STATE_NAMES = {
+        PipelineState.IDLE.value: STATE_IDLE,
+        PipelineState.START.value: "start",
+        PipelineState.RUNNING.value: "running",
+        PipelineState.END.value: "end",
+        PipelineState.ERROR.value: "error",
+    }
+
     def __init__(self, config_entry: ConfigEntry, key: str):
         """Initialize the sensor entity."""
         # First call the standard init function
@@ -75,7 +84,18 @@ class OmniAssistSensor(SensorEntity):
         
         This is called by the state machine through the dispatcher when
         the pipeline state changes.
+        
+        Args:
+            value: The pipeline state value, which can be a PipelineState enum
+                value or a string.
+            extra: Optional extra state attributes.
         """
-        self._attr_native_value = value or STATE_IDLE
+        if value is None:
+            self._attr_native_value = STATE_IDLE
+        else:
+            # Convert enum values to their string representation
+            # Handle both direct enum instances and string values that match enum values
+            self._attr_native_value = self.STATE_NAMES.get(value, value)
+            
         self._attr_extra_state_attributes = extra
         self.schedule_update_ha_state()

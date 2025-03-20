@@ -45,6 +45,8 @@ class OmniAssistSwitch(SwitchEntity):
             "intent-end": "intent-end",
             "tts-start": "tts-start",
             "tts-end": "tts-end",
+            "run-start": "run-start",
+            "run-end": "run-end",
         }
         
         # Handle the custom reset-after-tts event
@@ -66,6 +68,11 @@ class OmniAssistSwitch(SwitchEntity):
             self.hass.loop.call_soon_threadsafe(
                 async_dispatcher_send, self.hass, f"{self.uid}-tts", None
             )
+            return
+        
+        # Handle run-start and run-end events - used for overall pipeline state tracking
+        if event.type == "run-start" or event.type == "run-end":
+            # We don't need to show these events in the UI, they're for internal tracking only
             return
         
         # Handle error events specially

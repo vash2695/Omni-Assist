@@ -248,33 +248,12 @@ async def assist_run(
                         )
                         event_callback(reset_event)
                 
-                    _LOGGER.debug("Simulating wake word detection after TTS playback")
-                
-                    # Get the proper wake word for this pipeline
-                    wake_word_id = pipeline_run.pipeline.wake_word_id
-                    wake_word_phrase = re.sub(r'_', ' ',wake_word_id)
-                    wake_word_entity = pipeline_run.pipeline.wake_word_entity
-                
-                    # If wake_word_id is not set, try to get it from the entity
-                    if not wake_word_id and wake_word_entity:
-                        wake_word_entity_state = hass.states.get(wake_word_entity)
-                        if wake_word_entity_state:
-                            wake_word_id = wake_word_entity_state.attributes.get("wake_word_id")
-                
-                    # Default to "default" if we couldn't find a wake word ID
-                    wake_word_id = wake_word_id or "default"
+                    # No longer simulating wake word detection after TTS playback
+                    # This allows the wake entity to remain in "start" state
+                    _LOGGER.debug("TTS playback complete, system ready for next interaction")
                     
-                    # Simulate wake word detection end event - this now allows re-activating the pipeline
-                    # but our custom handling will ensure the wake entity returns to "start" state properly
-                    wake_word_event = PipelineEvent(
-                        PipelineEventType.WAKE_WORD_END,
-                        {"wake_word_output": {
-                            "wake_word_id": wake_word_id,
-                            "wake_word_phrase": wake_word_phrase,
-                            "timestamp": time.time()
-                        }}
-                    )
-                    pipeline_run.process_event(wake_word_event)
+                    # Don't generate a wake_word_event, let the real wake word detector handle it
+                    # This prevents the immediate transition back to "end" state
 
                 # Schedule an async task to simulate wake word and continue pipeline
                 hass.create_task(simulate_wake_word_and_continue())
@@ -363,12 +342,17 @@ def run_forever(
     async def run_assist():
         conversation_id = None
         last_interaction_time = None
+        waiting_for_next_interaction = True  # Flag to track if waiting for next interaction
+        
         while not stt_stream.closed:
             try:
                 current_time = time.time()
+                
+                # Reset conversation context if too much time has passed
                 if last_interaction_time and current_time - last_interaction_time > 300:
                     conversation_id = None
-
+                
+                # Run the assist pipeline
                 result = await assist_run(
                     hass,
                     data,
@@ -377,13 +361,23 @@ def run_forever(
                     stt_stream=stt_stream,
                     conversation_id=conversation_id
                 )
+                
+                # Update conversation tracking
                 new_conversation_id = result.get("conversation_id")
                 if new_conversation_id:
                     conversation_id = new_conversation_id
                     last_interaction_time = current_time
+                    waiting_for_next_interaction = False  # Actively in a conversation
+                
                 _LOGGER.debug(f"Conversation ID: {conversation_id}")
+                
+                # Short delay before next processing cycle
+                # This allows other asyncio tasks to run
+                await asyncio.sleep(0.1)
+                
             except Exception as e:
                 _LOGGER.exception(f"run_assist error: {e}")
+                await asyncio.sleep(1)  # Longer delay after error
 
     # Create coroutines
     run_stream_coro = run_stream()

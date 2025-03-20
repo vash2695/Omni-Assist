@@ -33,7 +33,7 @@ from .stream import Stream
 
 _LOGGER = logging.getLogger(__name__)
 
-DOMAIN = "stream_assist_cc"
+DOMAIN = "omni_assist"
 EVENTS = ["wake", "stt", "intent", "tts"]
 
 CANCELLATION_PHRASES = [
@@ -85,7 +85,7 @@ def play_media(hass: HomeAssistant, entity_id: str, media_id: str, media_type: s
 
     # hass.services.call will block Hass
     coro = hass.services.async_call("media_player", "play_media", service_data)
-    hass.async_create_background_task(coro, "stream_assist_cc_play_media")
+    hass.async_create_background_task(coro, "omni_assist_play_media")
 
 
 async def get_tts_duration(hass: HomeAssistant, tts_url: str) -> float:
@@ -365,7 +365,7 @@ def run_forever(
     run_assist_coro = run_assist()
 
     # Schedule the coroutines as background tasks
-    hass.loop.create_task(run_stream_coro, name="stream_assist_cc_run_stream")
-    hass.loop.create_task(run_assist_coro, name="stream_assist_cc_run_assist")
+    hass.loop.create_task(run_stream_coro, name="omni_assist_run_stream")
+    hass.loop.create_task(run_assist_coro, name="omni_assist_run_assist")
 
     return stt_stream.close

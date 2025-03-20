@@ -1,5 +1,5 @@
 ```yaml
-service: stream_assist_cc.run
+service: omni_assist.run
 data:
   stream_source: rtsp://...
   camera_entity_id: camera.xxx

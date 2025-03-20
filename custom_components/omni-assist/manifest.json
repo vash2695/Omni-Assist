@@ -1,6 +1,6 @@
 {
-  "domain": "stream_assist_cc",
-  "name": "Stream Assist CC",
+  "domain": "omni_assist",
+  "name": "Omni-Assist",
   "codeowners": [
     "@AlexxIT",
     "@vash2695"
@@ -10,7 +10,7 @@
     "stream",
     "assist_pipeline"
   ],
-  "documentation": "https://github.com/vash2695/StreamAssistCC",
+  "documentation": "https://github.com/vash2695/Omni-Assist",
   "iot_class": "calculated",
   "requirements": [],
   "version": "v0.0.1"

@@ -42,10 +42,16 @@ class OmniAssistSwitch(SwitchEntity):
     def event_callback(self, event):
         """Process pipeline events.
         
-        This is a passthrough to the state machine, which handles
-        the actual state management for all sensor entities.
+        This callback is passed to run_forever, which:
+        1. Creates a state machine
+        2. Processes events through the state machine first
+        3. Then calls this method
+        
+        All state updates are handled by the state machine, so this method
+        can be used for switch-specific event handling if needed.
         """
-        # The state machine handles all event processing when created in run_forever
+        # We don't need additional processing here since the state machine
+        # handles dispatching state updates to the sensor entities
         pass
 
     async def async_added_to_hass(self) -> None:

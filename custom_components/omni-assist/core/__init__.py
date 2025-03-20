@@ -353,8 +353,13 @@ def run_forever(
         # Create a state machine for managing pipeline state
         state_machine = OmniAssistStateMachine(hass, unique_id)
         
-        # Wrap the event callback with the state machine
-        state_callback = lambda event: event_callback(event)
+        # Create a callback that processes events through the state machine
+        # and then passes them to the original callback
+        def state_callback(event):
+            # Process the event with the state machine
+            state_machine.handle_pipeline_event(event)
+            # Also call the original callback if needed
+            event_callback(event)
     else:
         # If no callback, we won't be tracking state
         state_callback = None

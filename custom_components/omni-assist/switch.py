@@ -47,6 +47,27 @@ class OmniAssistSwitch(SwitchEntity):
             "tts-end": "tts-end",
         }
         
+        # Handle the custom reset-after-tts event
+        if event.type == "reset-after-tts":
+            _LOGGER.debug("TTS playback complete, resetting all entity states")
+            
+            # Reset wake to "start" state after TTS playback completes
+            self.hass.loop.call_soon_threadsafe(
+                async_dispatcher_send, self.hass, f"{self.uid}-wake", "start"
+            )
+            
+            # Reset all other entities to idle, including TTS
+            self.hass.loop.call_soon_threadsafe(
+                async_dispatcher_send, self.hass, f"{self.uid}-stt", None
+            )
+            self.hass.loop.call_soon_threadsafe(
+                async_dispatcher_send, self.hass, f"{self.uid}-intent", None
+            )
+            self.hass.loop.call_soon_threadsafe(
+                async_dispatcher_send, self.hass, f"{self.uid}-tts", None
+            )
+            return
+        
         # Handle error events specially
         if event.type == PipelineEventType.ERROR:
             code = event.data.get("code", "error")
@@ -73,28 +94,25 @@ class OmniAssistSwitch(SwitchEntity):
                     async_dispatcher_send, self.hass, f"{self.uid}-wake", "start"
                 )
             return
+        
+        # Special handling for TTS start - explicitly show the start state
+        if event.type == PipelineEventType.TTS_START:
+            _LOGGER.debug("TTS started, setting TTS entity to start state")
+            self.hass.loop.call_soon_threadsafe(
+                async_dispatcher_send, self.hass, f"{self.uid}-tts", "start", event.data
+            )
+            return
             
-        # Special handling for TTS end to reset wake entity to "start" state
+        # Special handling for TTS end to set TTS entity to "running" state during playback
         if event.type == PipelineEventType.TTS_END:
-            _LOGGER.debug("TTS ended, resetting wake entity to start state")
+            _LOGGER.debug("TTS processing ended, setting TTS entity to running state during playback")
             
-            # First dispatch the tts-end event
+            # Dispatch the tts-end event but use "running" instead of "end"
             self.hass.loop.call_soon_threadsafe(
-                async_dispatcher_send, self.hass, f"{self.uid}-tts", "end", event.data
-            )
-            
-            # Then reset wake to "start" state after pipeline completes
-            self.hass.loop.call_soon_threadsafe(
-                async_dispatcher_send, self.hass, f"{self.uid}-wake", "start"
+                async_dispatcher_send, self.hass, f"{self.uid}-tts", "running", event.data
             )
             
-            # Also reset other entities to idle
-            self.hass.loop.call_soon_threadsafe(
-                async_dispatcher_send, self.hass, f"{self.uid}-stt", None
-            )
-            self.hass.loop.call_soon_threadsafe(
-                async_dispatcher_send, self.hass, f"{self.uid}-intent", None
-            )
+            # State resets will be handled by reset-after-tts event after playback completes
             return
             
         # Process normal pipeline events

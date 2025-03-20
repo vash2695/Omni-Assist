@@ -235,6 +235,19 @@ async def assist_run(
                     await asyncio.sleep(duration)
                     await asyncio.sleep(1)  # Additional small delay
                 
+                    # After TTS playback completes, reset entity states
+                    if event_callback:
+                        _LOGGER.debug(f"TTS playback of {duration} seconds completed, resetting entity states")
+                        # Create and pass a custom event for entity state management after TTS playback
+                        reset_event = PipelineEvent(
+                            "reset-after-tts",
+                            {
+                                "message": "TTS playback complete, resetting states",
+                                "timestamp": time.time()
+                            }
+                        )
+                        event_callback(reset_event)
+                
                     _LOGGER.debug("Simulating wake word detection after TTS playback")
                 
                     # Get the proper wake word for this pipeline

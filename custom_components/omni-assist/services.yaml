@@ -35,6 +35,24 @@ run:
       selector:
         text:
 
+    stt_end_media:
+      name: STT end media
+      description: Link to the media for playing on STT end
+      selector:
+        text:
+
+    stt_error_media:
+      name: STT error media
+      description: Link to the media for playing on STT error
+      selector:
+        text:
+
+    cancellation_media:
+      name: Cancellation media
+      description: Link to the media for playing when cancellation phrase is detected
+      selector:
+        text:
+
     pipeline_id:
       name: Pipeline
       description: Settings > Voice Assistant

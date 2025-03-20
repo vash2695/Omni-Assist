@@ -206,6 +206,18 @@ async def assist_run(
                     play_media(hass, player_entity_id, media_id, "music")
                 # Cancel the pipeline
                 pipeline_run.stop(PipelineStage.STT)
+                
+                # Create and pass a custom event to reset entity states after cancellation
+                if event_callback:
+                    _LOGGER.debug("Cancellation detected, resetting entity states")
+                    reset_event = PipelineEvent(
+                        "reset-after-cancellation",
+                        {
+                            "message": "Cancellation phrase detected, resetting states",
+                            "timestamp": time.time()
+                        }
+                    )
+                    event_callback(reset_event)
             elif player_entity_id and (media_id := data.get("stt_end_media")):
                 play_media(hass, player_entity_id, media_id, "music")
         elif event.type == PipelineEventType.ERROR:

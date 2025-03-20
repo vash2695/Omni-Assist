@@ -70,6 +70,27 @@ class OmniAssistSwitch(SwitchEntity):
             )
             return
         
+        # Handle the custom reset-after-cancellation event
+        if event.type == "reset-after-cancellation":
+            _LOGGER.debug("Cancellation detected, resetting entity states")
+            
+            # Reset wake to "start" state after cancellation
+            self.hass.loop.call_soon_threadsafe(
+                async_dispatcher_send, self.hass, f"{self.uid}-wake", "start"
+            )
+            
+            # Reset all other entities to idle
+            self.hass.loop.call_soon_threadsafe(
+                async_dispatcher_send, self.hass, f"{self.uid}-stt", None
+            )
+            self.hass.loop.call_soon_threadsafe(
+                async_dispatcher_send, self.hass, f"{self.uid}-intent", None
+            )
+            self.hass.loop.call_soon_threadsafe(
+                async_dispatcher_send, self.hass, f"{self.uid}-tts", None
+            )
+            return
+        
         # Handle run-start and run-end events - used for overall pipeline state tracking
         if event.type == "run-start" or event.type == "run-end":
             # We don't need to show these events in the UI, they're for internal tracking only

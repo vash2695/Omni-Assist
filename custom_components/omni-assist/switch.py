@@ -75,20 +75,25 @@ class OmniAssistSwitch(SwitchEntity):
             _LOGGER.debug("Cancellation detected, resetting entity states")
             
             # Reset wake to "start" state after cancellation
+            _LOGGER.debug(f"Resetting wake entity to 'start' state after cancellation: {self.uid}-wake")
             self.hass.loop.call_soon_threadsafe(
                 async_dispatcher_send, self.hass, f"{self.uid}-wake", "start"
             )
             
             # Reset all other entities to idle
+            _LOGGER.debug(f"Resetting STT entity to idle after cancellation: {self.uid}-stt")
             self.hass.loop.call_soon_threadsafe(
                 async_dispatcher_send, self.hass, f"{self.uid}-stt", None
             )
+            _LOGGER.debug(f"Resetting intent entity to idle after cancellation: {self.uid}-intent")
             self.hass.loop.call_soon_threadsafe(
                 async_dispatcher_send, self.hass, f"{self.uid}-intent", None
             )
+            _LOGGER.debug(f"Resetting TTS entity to idle after cancellation: {self.uid}-tts")
             self.hass.loop.call_soon_threadsafe(
                 async_dispatcher_send, self.hass, f"{self.uid}-tts", None
             )
+            _LOGGER.debug("All entities reset after cancellation")
             return
         
         # Handle run-start and run-end events - used for overall pipeline state tracking
@@ -143,6 +148,14 @@ class OmniAssistSwitch(SwitchEntity):
             # State resets will be handled by reset-after-tts event after playback completes
             return
             
+        # Handle explicit tts-running event
+        if event.type == "tts-running":
+            _LOGGER.debug("Explicit TTS running event received, setting TTS entity to running state")
+            self.hass.loop.call_soon_threadsafe(
+                async_dispatcher_send, self.hass, f"{self.uid}-tts", "running", event.data
+            )
+            return
+        
         # Process normal pipeline events
         evt_type = event.type
         if evt_type in event_type_mapping:

@@ -204,12 +204,10 @@ async def assist_run(
                 _LOGGER.info(f"Cancellation phrase detected: {stt_text}")
                 if player_entity_id and (media_id := data.get("cancellation_media")):
                     play_media(hass, player_entity_id, media_id, "music")
-                # Cancel the pipeline
-                pipeline_run.stop(PipelineStage.STT)
                 
-                # Create and pass a custom event to reset entity states after cancellation
+                # Immediately dispatch reset event before stopping the pipeline
                 if event_callback:
-                    _LOGGER.debug("Cancellation detected, resetting entity states")
+                    _LOGGER.debug("Cancellation detected, creating reset event")
                     reset_event = PipelineEvent(
                         "reset-after-cancellation",
                         {
@@ -217,7 +215,11 @@ async def assist_run(
                             "timestamp": time.time()
                         }
                     )
+                    # Call event_callback directly to ensure it's processed
                     event_callback(reset_event)
+                
+                # Cancel the pipeline after reset event is processed
+                pipeline_run.stop(PipelineStage.STT)
             elif player_entity_id and (media_id := data.get("stt_end_media")):
                 play_media(hass, player_entity_id, media_id, "music")
         elif event.type == PipelineEventType.ERROR:
@@ -237,6 +239,20 @@ async def assist_run(
             if player_entity_id:
                 tts = event.data["tts_output"]
                 tts_url = tts["url"]
+
+                # Ensure the TTS entity transitions to "running" state
+                if event_callback:
+                    # Forcefully dispatch TTS running state immediately
+                    _LOGGER.debug("TTS ended, explicitly setting TTS entity to running state")
+                    running_event = PipelineEvent(
+                        "tts-running",
+                        {
+                            "message": "TTS playback in progress",
+                            "timestamp": time.time(),
+                            "tts_output": tts
+                        }
+                    )
+                    event_callback(running_event)
 
                 async def simulate_wake_word_and_continue():
                     duration = await get_tts_duration(hass, tts_url)

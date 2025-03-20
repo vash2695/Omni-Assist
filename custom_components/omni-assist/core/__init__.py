@@ -189,6 +189,11 @@ async def assist_run(
             else {"timestamp": event.timestamp}
         )
 
+        # Make sure to pass all events to the event callback if provided
+        if event_callback:
+            event_callback(event)
+
+        # Handle specific pipeline events
         if event.type == PipelineEventType.STT_START:
             if player_entity_id and (media_id := data.get("stt_start_media")):
                 play_media(hass, player_entity_id, media_id, "music")
@@ -207,6 +212,15 @@ async def assist_run(
             if event.data.get("code") == "stt-no-text-recognized":
                 if player_entity_id and (media_id := data.get("stt_error_media")):
                     play_media(hass, player_entity_id, media_id, "music")
+        elif event.type == PipelineEventType.INTENT_START:
+            # Just log this event - it's already passed to event_callback
+            _LOGGER.debug("Intent processing started")
+        elif event.type == PipelineEventType.INTENT_END:
+            # Just log this event - it's already passed to event_callback
+            _LOGGER.debug("Intent processing ended")
+        elif event.type == PipelineEventType.TTS_START:
+            # Just log this event - it's already passed to event_callback
+            _LOGGER.debug("TTS processing started")
         elif event.type == PipelineEventType.TTS_END:
             if player_entity_id:
                 tts = event.data["tts_output"]
@@ -237,7 +251,8 @@ async def assist_run(
                     # Default to "default" if we couldn't find a wake word ID
                     wake_word_id = wake_word_id or "default"
                     
-                    # Simulate wake word detection end event
+                    # Simulate wake word detection end event - this now allows re-activating the pipeline
+                    # but our custom handling will ensure the wake entity returns to "start" state properly
                     wake_word_event = PipelineEvent(
                         PipelineEventType.WAKE_WORD_END,
                         {"wake_word_output": {
@@ -251,9 +266,6 @@ async def assist_run(
                 # Schedule an async task to simulate wake word and continue pipeline
                 hass.create_task(simulate_wake_word_and_continue())
                 play_media(hass, player_entity_id, tts["url"], tts["mime_type"])
-
-        if event_callback:
-            event_callback(event)
 
     pipeline_run = PipelineRun(
         hass,

@@ -34,16 +34,119 @@ class OmniAssistSwitch(SwitchEntity):
 
     def event_callback(self, event: PipelineEvent):
         _LOGGER.debug(f"Received pipeline event: {event.type}")
-        code = (
-            event.data["code"]
-            if event.type == PipelineEventType.ERROR
-            else event.type.replace("_word", "")
-        )
-        name, state = code.split("-", 1)
-        _LOGGER.debug(f"Dispatching event: {self.uid}-{name}, state: {state}")
-        self.hass.loop.call_soon_threadsafe(
-            async_dispatcher_send, self.hass, f"{self.uid}-{name}", state, event.data
-        )
+        
+        # Map pipeline event types to our sensor entity types
+        event_type_mapping = {
+            "wake_word-start": "wake-start",
+            "wake_word-end": "wake-end", 
+            "stt-start": "stt-start",
+            "stt-end": "stt-end",
+            "intent-start": "intent-start",
+            "intent-end": "intent-end",
+            "tts-start": "tts-start",
+            "tts-end": "tts-end",
+        }
+        
+        # Handle error events specially
+        if event.type == PipelineEventType.ERROR:
+            code = event.data.get("code", "error")
+            # Determine which stage had the error
+            if "wake_word" in code:
+                stage = "wake"
+            elif "stt" in code:
+                stage = "stt"
+            elif "intent" in code:
+                stage = "intent"
+            elif "tts" in code:
+                stage = "tts"
+            else:
+                stage = "error"
+                
+            _LOGGER.debug(f"Error in stage {stage}: {code}")
+            self.hass.loop.call_soon_threadsafe(
+                async_dispatcher_send, self.hass, f"{self.uid}-{stage}", "error", event.data
+            )
+            
+            # After an error, wake entity should return to "start" state
+            if stage != "wake":  # Only if the error wasn't in the wake stage
+                self.hass.loop.call_soon_threadsafe(
+                    async_dispatcher_send, self.hass, f"{self.uid}-wake", "start"
+                )
+            return
+            
+        # Special handling for TTS end to reset wake entity to "start" state
+        if event.type == PipelineEventType.TTS_END:
+            _LOGGER.debug("TTS ended, resetting wake entity to start state")
+            
+            # First dispatch the tts-end event
+            self.hass.loop.call_soon_threadsafe(
+                async_dispatcher_send, self.hass, f"{self.uid}-tts", "end", event.data
+            )
+            
+            # Then reset wake to "start" state after pipeline completes
+            self.hass.loop.call_soon_threadsafe(
+                async_dispatcher_send, self.hass, f"{self.uid}-wake", "start"
+            )
+            
+            # Also reset other entities to idle
+            self.hass.loop.call_soon_threadsafe(
+                async_dispatcher_send, self.hass, f"{self.uid}-stt", None
+            )
+            self.hass.loop.call_soon_threadsafe(
+                async_dispatcher_send, self.hass, f"{self.uid}-intent", None
+            )
+            return
+            
+        # Process normal pipeline events
+        evt_type = event.type
+        if evt_type in event_type_mapping:
+            # Use our mapping for standard events
+            mapped_event = event_type_mapping[evt_type]
+            stage, state = mapped_event.split("-", 1)
+            
+            # Special handling for wake events
+            if stage == "wake":
+                if state == "end":
+                    # When wake word is detected (wake-end), set wake to "end" state
+                    _LOGGER.debug(f"Wake word detected, setting wake to end state")
+                    self.hass.loop.call_soon_threadsafe(
+                        async_dispatcher_send, self.hass, f"{self.uid}-{stage}", "end", event.data
+                    )
+                # Ignore wake-start events as we manage wake state differently
+                return
+                
+            _LOGGER.debug(f"Dispatching mapped event: {self.uid}-{stage}, state: {state}")
+            self.hass.loop.call_soon_threadsafe(
+                async_dispatcher_send, self.hass, f"{self.uid}-{stage}", state, event.data
+            )
+        else:
+            # For any other event types, try to parse them directly
+            try:
+                # Try to split standard format "stage-state"
+                if "-" in evt_type:
+                    raw_stage, state = evt_type.split("-", 1)
+                    
+                    # Convert wake_word to wake
+                    stage = "wake" if raw_stage == "wake_word" else raw_stage
+                    
+                    # Special handling for wake events
+                    if stage == "wake":
+                        if state == "end":
+                            _LOGGER.debug(f"Wake word detected (raw event), setting wake to end state")
+                            self.hass.loop.call_soon_threadsafe(
+                                async_dispatcher_send, self.hass, f"{self.uid}-{stage}", "end", event.data
+                            )
+                        # Ignore wake-start events as we manage wake state differently
+                        return
+                        
+                    _LOGGER.debug(f"Dispatching parsed event: {self.uid}-{stage}, state: {state}")
+                    self.hass.loop.call_soon_threadsafe(
+                        async_dispatcher_send, self.hass, f"{self.uid}-{stage}", state, event.data
+                    )
+                else:
+                    _LOGGER.warning(f"Unhandled event type: {evt_type}")
+            except Exception as e:
+                _LOGGER.error(f"Error processing event {evt_type}: {e}")
 
     async def async_added_to_hass(self) -> None:
         _LOGGER.debug("OmniAssistSwitch added to HASS")
@@ -60,9 +163,15 @@ class OmniAssistSwitch(SwitchEntity):
         self._async_write_ha_state()
         _LOGGER.debug("Set OmniAssistSwitch state to on")
 
+        # Set all entities to idle initially
         for event in EVENTS:
-            _LOGGER.debug(f"Dispatching initial event: {self.uid}-{event}")
-            async_dispatcher_send(self.hass, f"{self.uid}-{event}", None)
+            _LOGGER.debug(f"Dispatching initial state for: {self.uid}-{event}")
+            if event == "wake":
+                # Wake entity should show "start" when mic is on but pipeline isn't active
+                async_dispatcher_send(self.hass, f"{self.uid}-{event}", "start")
+            else:
+                # Other entities remain idle
+                async_dispatcher_send(self.hass, f"{self.uid}-{event}", None)
 
         try:
             _LOGGER.debug("Calling run_forever")
@@ -87,6 +196,11 @@ class OmniAssistSwitch(SwitchEntity):
         self._attr_is_on = False
         self._async_write_ha_state()
         _LOGGER.debug("Set OmniAssistSwitch state to off")
+
+        # Reset all sensor entities to IDLE state when switch is off
+        for event in EVENTS:
+            _LOGGER.debug(f"Resetting entity state for: {self.uid}-{event}")
+            async_dispatcher_send(self.hass, f"{self.uid}-{event}", None)
 
         if self.on_close is not None:
             try:

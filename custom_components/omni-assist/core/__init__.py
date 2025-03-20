@@ -141,8 +141,8 @@ async def assist_run(
     stt_stream: Stream = None,
     conversation_id: str | None = None
 ) -> dict:
-    # Always use "omni" as the conversation ID
-    conversation_id = "omni"
+    # Always use a fixed conversation ID with the proper format
+    conversation_id = "01JPTT4J8D547XN61F4N7YPGSF"
     _LOGGER.debug(f"assist_run called with conversation_id: {conversation_id}")
     
     # 1. Process assist_pipeline settings
@@ -370,7 +370,7 @@ def run_forever(
             await asyncio.sleep(30)
 
     async def run_assist():
-        conversation_id = "omni"  # Always use "omni" as the conversation ID
+        conversation_id = "01JPTT4J8D547XN61F4N7YPGSF"  # Fixed conversation ID with proper format
         last_interaction_time = None
         waiting_for_next_interaction = True  # Flag to track if waiting for next interaction
         

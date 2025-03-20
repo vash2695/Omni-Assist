@@ -141,8 +141,6 @@ async def assist_run(
     stt_stream: Stream = None,
     conversation_id: str | None = None
 ) -> dict:
-    # Always use a fixed conversation ID with the proper format
-    conversation_id = "01JPTT4J8D547XN61F4N7YPGSF"
     _LOGGER.debug(f"assist_run called with conversation_id: {conversation_id}")
     
     # 1. Process assist_pipeline settings
@@ -370,7 +368,7 @@ def run_forever(
             await asyncio.sleep(30)
 
     async def run_assist():
-        conversation_id = "01JPTT4J8D547XN61F4N7YPGSF"  # Fixed conversation ID with proper format
+        conversation_id = None
         last_interaction_time = None
         waiting_for_next_interaction = True  # Flag to track if waiting for next interaction
         
@@ -378,9 +376,9 @@ def run_forever(
             try:
                 current_time = time.time()
                 
-                # We no longer need to reset conversation context since we're using a fixed ID
-                # if last_interaction_time and current_time - last_interaction_time > 300:
-                #     conversation_id = None
+                # Reset conversation context if too much time has passed
+                if last_interaction_time and current_time - last_interaction_time > 300:
+                    conversation_id = None
                 
                 # Run the assist pipeline
                 result = await assist_run(
@@ -393,17 +391,13 @@ def run_forever(
                 )
                 
                 # Update conversation tracking
-                # We don't need to update the conversation_id anymore since it's fixed
-                # new_conversation_id = result.get("conversation_id")
-                # if new_conversation_id:
-                #     conversation_id = new_conversation_id
-                
-                # Still track the last interaction time for other purposes
-                if result.get("conversation_id"):
+                new_conversation_id = result.get("conversation_id")
+                if new_conversation_id:
+                    conversation_id = new_conversation_id
                     last_interaction_time = current_time
                     waiting_for_next_interaction = False  # Actively in a conversation
                 
-                _LOGGER.debug(f"Using fixed conversation ID: {conversation_id}")
+                _LOGGER.debug(f"Conversation ID: {conversation_id}")
                 
                 # Short delay before next processing cycle
                 # This allows other asyncio tasks to run

@@ -1,15 +1,9 @@
-"""Core functionality for the Omni-Assist integration.
-
-This module provides the core functionality for the Omni-Assist integration,
-connecting audio streams to the Home Assistant voice assistant pipeline.
-"""
-
 import asyncio
 import io
 import logging
 import time
 import re
-from typing import Callable, Dict, Any, Optional
+from typing import Callable
 from mutagen.mp3 import MP3
 
 from homeassistant.components import assist_pipeline
@@ -35,14 +29,12 @@ from homeassistant.helpers.entity_component import EntityComponent
 from homeassistant.helpers.network import get_url
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .audio_processor import get_stream_source, play_media, get_tts_duration, stream_run
-from .pipeline_manager import run_pipeline as assist_run
-from .state_machine import EVENTS, OmniAssistStateMachine, create_event_callback
 from .stream import Stream
 
 _LOGGER = logging.getLogger(__name__)
 
 DOMAIN = "omni_assist"
+EVENTS = ["wake", "stt", "intent", "tts"]
 
 CANCELLATION_PHRASES = [
     r'\bnevermind\b', r'\bnever mind\b', r'\bthank you\b', r'\bcancel that\b', 
@@ -52,7 +44,6 @@ CANCELLATION_PHRASES = [
 
 
 def new(cls, kwargs: dict):
-    """Create a new instance of a class with just the supported kwargs."""
     if not kwargs:
         return cls()
     kwargs = {k: v for k, v in kwargs.items() if hasattr(cls, k)}
@@ -60,7 +51,6 @@ def new(cls, kwargs: dict):
 
 
 def init_entity(entity: Entity, key: str, config_entry: ConfigEntry) -> str:
-    """Initialize common entity attributes and return the unique ID prefix."""
     unique_id = config_entry.entry_id[:7]
     num = 1 + EVENTS.index(key) if key in EVENTS else 0
 
@@ -334,49 +324,25 @@ async def assist_run(
 
 def run_forever(
     hass: HomeAssistant,
-    data: Dict[str, Any],
-    context: Optional[Context] = None,
-    event_callback: Optional[Callable] = None,
+    data: dict,
+    context: Context,
+    event_callback: PipelineEventCallback,
 ) -> Callable:
-    """Run the Omni-Assist pipeline continuously.
-    
-    Returns a function that can be called to stop the pipeline.
-    """
-    _LOGGER.debug("Starting continuous pipeline execution")
+    _LOGGER.debug("Entering run_forever function")
     stt_stream = Stream()
-    
-    # Create a unique ID for this instance based on the data
-    unique_id = data.get("unique_id", "omni_assist")
-    
-    # Create state machine if we have a proper event callback
-    if event_callback:
-        # Create a state machine for managing pipeline state
-        state_machine = OmniAssistStateMachine(hass, unique_id)
-        
-        # Create a callback that processes events through the state machine
-        # and then passes them to the original callback
-        def state_callback(event):
-            # Process the event with the state machine
-            state_machine.handle_pipeline_event(event)
-            # Also call the original callback if needed
-            event_callback(event)
-    else:
-        # If no callback, we won't be tracking state
-        state_callback = None
 
     async def run_stream():
-        """Continuously capture audio from the stream source."""
         while not stt_stream.closed:
             try:
                 await stream_run(hass, data, stt_stream=stt_stream)
             except Exception as e:
-                _LOGGER.debug(f"Stream processing error: {type(e)}: {e}")
-            await asyncio.sleep(30)  # Wait before retry
+                _LOGGER.debug(f"run_stream error {type(e)}: {e}")
+            await asyncio.sleep(30)
 
     async def run_assist():
-        """Continuously process audio through the assist pipeline."""
         conversation_id = None
         last_interaction_time = None
+        waiting_for_next_interaction = True  # Flag to track if waiting for next interaction
         
         while not stt_stream.closed:
             try:
@@ -391,7 +357,7 @@ def run_forever(
                     hass,
                     data,
                     context=context,
-                    event_callback=state_callback,
+                    event_callback=event_callback,
                     stt_stream=stt_stream,
                     conversation_id=conversation_id
                 )
@@ -401,14 +367,16 @@ def run_forever(
                 if new_conversation_id:
                     conversation_id = new_conversation_id
                     last_interaction_time = current_time
+                    waiting_for_next_interaction = False  # Actively in a conversation
                 
                 _LOGGER.debug(f"Conversation ID: {conversation_id}")
                 
                 # Short delay before next processing cycle
+                # This allows other asyncio tasks to run
                 await asyncio.sleep(0.1)
                 
             except Exception as e:
-                _LOGGER.exception(f"Pipeline processing error: {e}")
+                _LOGGER.exception(f"run_assist error: {e}")
                 await asyncio.sleep(1)  # Longer delay after error
 
     # Create coroutines
@@ -419,5 +387,4 @@ def run_forever(
     hass.loop.create_task(run_stream_coro, name="omni_assist_run_stream")
     hass.loop.create_task(run_assist_coro, name="omni_assist_run_assist")
 
-    # Return the close function to allow stopping the pipeline
     return stt_stream.close

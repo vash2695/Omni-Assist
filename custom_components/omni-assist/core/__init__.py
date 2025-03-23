@@ -22,14 +22,17 @@ from homeassistant.components.assist_pipeline import (
 )
 from homeassistant.components.camera import Camera
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, Context
-from homeassistant.helpers.device_registry import DeviceEntryType
+from homeassistant.core import HomeAssistant, Context, ServiceResponse, SupportsResponse, ServiceCall
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceEntry
 from homeassistant.helpers.entity import Entity, DeviceInfo
 from homeassistant.helpers.entity_component import EntityComponent
 from homeassistant.helpers.network import get_url
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.const import Platform
+from homeassistant.helpers.typing import ConfigType
 
 from .stream import Stream
+from ..google_stt_settings import configure_google_stt_pipeline
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -145,6 +148,10 @@ async def assist_run(
     
     # 1. Process assist_pipeline settings
     assist = data.get("assist", {})
+
+    # Apply Google STT optimized settings
+    assist = configure_google_stt_pipeline(assist)
+    _LOGGER.debug("Applied optimized Google STT settings to prevent early VAD timeout")
 
     if pipeline_id := data.get("pipeline_id"):
         # get pipeline from pipeline ID

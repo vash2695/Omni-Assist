@@ -12,6 +12,6 @@
   ],
   "documentation": "https://github.com/vash2695/Omni-Assist",
   "iot_class": "calculated",
-  "requirements": [],
-  "version": "v0.0.1"
+  "requirements": ["rhasspy-wyoming>=2.0.0", "zeroconf>=0.38.0"],
+  "version": "v0.1.0"
 }

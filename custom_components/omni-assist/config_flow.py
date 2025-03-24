@@ -85,20 +85,40 @@ class OptionsFlowHandler(OptionsFlow):
 
         defaults = self.config_entry.options.copy()
 
+        # Build options schema
+        options_schema = {
+            # Existing options
+            vol.Exclusive("stream_source", "url"): str,
+            vol.Exclusive("camera_entity_id", "url"): vol.In(cameras),
+            vol.Optional("player_entity_id"): cv.multi_select(players),
+            vol.Optional("stt_start_media"): str,
+            vol.Optional("stt_end_media"): str,
+            vol.Optional("stt_error_media"): str,
+            vol.Optional("pipeline_id"): vol.In(pipelines),
+            
+            # Wyoming satellite options
+            vol.Optional(
+                "enable_wyoming_satellite",
+                description={"suggested_value": defaults.get("enable_wyoming_satellite", True)},
+                default=defaults.get("enable_wyoming_satellite", True),
+            ): bool,
+            vol.Optional(
+                "wyoming_port",
+                description={"suggested_value": defaults.get("wyoming_port", 10700)},
+                default=defaults.get("wyoming_port", 10700),
+            ): vol.All(
+                vol.Coerce(int), 
+                vol.Range(min=1024, max=65535),
+                msg="Port must be between 1024 and 65535"
+            ),
+        }
+
         return self.async_show_form(
             step_id="init",
-            data_schema=vol_schema(
-                {
-                    vol.Exclusive("stream_source", "url"): str,
-                    vol.Exclusive("camera_entity_id", "url"): vol.In(cameras),
-                    vol.Optional("player_entity_id"): cv.multi_select(players),
-                    vol.Optional("stt_start_media"): str,
-                    vol.Optional("stt_end_media"): str,
-                    vol.Optional("stt_error_media"): str,
-                    vol.Optional("pipeline_id"): vol.In(pipelines),
-                },
-                defaults,
-            ),
+            data_schema=vol_schema(options_schema, defaults),
+            description_placeholders={
+                "wyoming_note": "The Wyoming satellite allows Omni-Assist to be triggered by automations and services."
+            },
         )
 
 

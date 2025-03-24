@@ -1,0 +1,45 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configure Omni-Assist",
+        "description": "Set up Omni-Assist to provide an enhanced voice assistant experience",
+        "data": {
+          "name": "Name",
+          "stream_source": "Stream Source URL",
+          "camera_entity_id": "Camera Entity",
+          "player_entity_id": "Media Player Entities",
+          "stt_start_media": "STT Start Media URL",
+          "stt_end_media": "STT End Media URL",
+          "stt_error_media": "STT Error Media URL",
+          "pipeline_id": "Assist Pipeline",
+          "satellite_mode": "Enable Satellite Mode",
+          "satellite_room": "Satellite Room Name"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Omni-Assist Options",
+        "description": "Configure settings for Omni-Assist",
+        "data": {
+          "satellite_mode": "Enable Satellite Mode",
+          "pipeline_id": "Assist Pipeline"
+        }
+      },
+      "satellite": {
+        "title": "Satellite Configuration",
+        "description": "Configure satellite settings for Omni-Assist",
+        "data": {
+          "satellite_room": "Room Name",
+          "satellite_port": "Wyoming Server Port (1024-65535)"
+        }
+      }
+    },
+    "error": {
+      "invalid_port": "Port number must be between 1024 and 65535"
+    }
+  }
+} 

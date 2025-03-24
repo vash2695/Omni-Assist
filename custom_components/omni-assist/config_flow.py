@@ -6,8 +6,14 @@ from homeassistant.components.media_player import MediaPlayerEntityFeature
 from homeassistant.config_entries import ConfigFlow, ConfigEntry, OptionsFlow
 from homeassistant.core import callback
 from homeassistant.helpers import entity_registry
+from homeassistant.data_entry_flow import FlowResult
 
 from .core import DOMAIN
+
+# Add translations for errors
+ERRORS = {
+    "invalid_port": "Port number must be between 1024 and 65535"
+}
 
 async def get_pipelines(hass):
     """Get available pipelines from Home Assistant."""

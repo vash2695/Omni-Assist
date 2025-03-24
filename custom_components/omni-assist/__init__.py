@@ -10,12 +10,13 @@ from homeassistant.core import HomeAssistant, ServiceResponse, SupportsResponse,
 from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.components.assist_pipeline import (
-    Pipeline, 
-    PipelineRun,
-    PipelineStage,
-    PipelineRunOptions,
-    async_pipeline_from_audio_stream
+    async_get_pipeline,
+    async_pipeline_from_audio_stream,
+    Pipeline,
+    PipelineEvent,
+    PipelineStage
 )
+from homeassistant.components.media_source.models import MediaSourceItem
 
 from .core import DOMAIN, get_stream_source, assist_run, stream_run
 from .core.stream import Stream
@@ -114,11 +115,11 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
                     os.unlink(temp_path)
                     
                 # Create a media source for the pipeline
-                media = Pipeline.MediaSource(
-                    name="Wyoming Audio", 
-                    content_type="audio/wav",
-                    buffer=wav_data,
-                )
+                media = {
+                    "name": "Wyoming Audio", 
+                    "content_type": "audio/wav",
+                    "buffer": wav_data,
+                }
                 
                 # Process audio at the "stt" stage of the pipeline
                 try:
@@ -131,32 +132,23 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
                         run_id = str(uuid.uuid4())
                         
                         # Get the pipeline
-                        pipeline = await hass.components.assist_pipeline.async_get_pipeline(hass, pipeline_id)
+                        pipeline = await async_get_pipeline(hass, pipeline_id)
                         
                         if not pipeline:
                             _LOGGER.warning(f"Pipeline {pipeline_id} not found")
                             return
                             
-                        # Set up the pipeline options
-                        options = PipelineRunOptions(
-                            pipeline=pipeline,
-                            start_stage=PipelineStage.STT,
-                            end_stage=PipelineStage.TTS,
-                            runner_data={
-                                "source": "wyoming",
-                                "entry_id": config_entry.entry_id,
-                            }
-                        )
-                        
-                        # Run the pipeline
+                        # Run the pipeline with the audio data
                         await async_pipeline_from_audio_stream(
                             hass=hass,
+                            pipeline_id=pipeline_id,
                             media=media,
-                            options=options,
+                            start_stage=PipelineStage.STT,
+                            end_stage=PipelineStage.TTS,
+                            event_callback=None,
                             run_id=run_id,
-                            context=None,  # No context needed
-                            device_id=None,  # Will use the default device
-                            event_callback=None,  # We'll handle events through the pipeline run
+                            context=None,
+                            device_id=None,
                         )
                     else:
                         _LOGGER.warning("No pipeline ID set for Wyoming audio processing")

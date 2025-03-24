@@ -171,6 +171,9 @@ async def assist_run(
         # Map string stage name to PipelineStage enum
         if start_stage_str == "intent":
             assist["start_stage"] = PipelineStage.INTENT
+            # Log intent input if present when starting from intent stage
+            if intent_input := assist.get("intent_input"):
+                _LOGGER.debug(f"Starting from intent stage with input: {intent_input}")
         elif start_stage_str == "stt":
             assist["start_stage"] = PipelineStage.STT
         elif start_stage_str == "wake_word":
@@ -286,7 +289,8 @@ async def assist_run(
 
                 async def simulate_wake_word_and_continue():
                     duration = await get_tts_duration(hass, tts_url)
-                    events[PipelineEventType.TTS_END]["data"]["tts_duration"] = duration
+                    if PipelineEventType.TTS_END in events and events[PipelineEventType.TTS_END].get("data"):
+                        events[PipelineEventType.TTS_END]["data"]["tts_duration"] = duration
                     _LOGGER.debug(f"Stored TTS duration: {duration} seconds")
                 
                     # Set a timer to simulate wake word detection after TTS playback
@@ -301,16 +305,33 @@ async def assist_run(
                     # After TTS playback completes, reset entity states
                     if event_callback:
                         _LOGGER.debug(f"TTS playback of {duration} seconds completed, resetting entity states")
+                        # Get conversation ID if available
+                        conversation_id = None
+                        if PipelineEventType.INTENT_END in events:
+                            intent_data = events.get(PipelineEventType.INTENT_END, {}).get("data", {})
+                            if isinstance(intent_data, dict):
+                                intent_output = intent_data.get("intent_output", {})
+                                if isinstance(intent_output, dict):
+                                    conversation_id = intent_output.get("conversation_id")
+                        
                         # Create and pass a custom event for entity state management after TTS playback
+                        reset_data = {
+                            "message": "TTS playback complete, resetting states",
+                            "timestamp": time.time(),
+                            "request_followup": request_followup,
+                        }
+                        
+                        # Only add conversation_id if it exists
+                        if conversation_id:
+                            reset_data["conversation_id"] = conversation_id
+                            
+                        # Only add device_uid if it exists
+                        if device_uid:
+                            reset_data["device_uid"] = device_uid
+                            
                         reset_event = PipelineEvent(
-                            "reset-after-tts",
-                            {
-                                "message": "TTS playback complete, resetting states",
-                                "timestamp": time.time(),
-                                "request_followup": request_followup,
-                                "conversation_id": events.get(PipelineEventType.INTENT_END, {}).get("data", {}).get("intent_output", {}).get("conversation_id"),
-                                "device_uid": device_uid
-                            }
+                            "reset-after-tts", 
+                            reset_data
                         )
                         event_callback(reset_event)
                 

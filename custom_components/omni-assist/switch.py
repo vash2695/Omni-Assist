@@ -82,20 +82,24 @@ class OmniAssistSwitch(SwitchEntity):
                 
                 # Get conversation_id from event data if available
                 conversation_id = None
-                if event.data and "conversation_id" in event.data:
+                if event.data:
                     conversation_id = event.data.get("conversation_id")
                 
                 # Prepare service call to start new pipeline
                 service_data = {
                     "device_id": self.device_entry.id,
                     "start_stage": "stt",  # Skip wake word detection
-                    "conversation_id": conversation_id
                 }
+                
+                # Only add conversation_id if it exists
+                if conversation_id:
+                    service_data["conversation_id"] = conversation_id
+                    _LOGGER.debug(f"Continuing conversation with ID: {conversation_id}")
                 
                 # Call the omni_assist.run service to start a new pipeline
                 self.hass.async_create_task(
                     self.hass.services.async_call(
-                        DOMAIN, "run", service_data, context=self._context
+                        DOMAIN, "run", service_data, blocking=False
                     )
                 )
                 return

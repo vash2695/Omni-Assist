@@ -24,6 +24,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType):
         start_stage = call.data.get("start_stage")
         request_followup = call.data.get("request_followup", False)
         conversation_id = call.data.get("conversation_id")
+        text_input = call.data.get("text_input")
         
         # Get run options - either from specified device or from call data
         run_options = call.data.copy()
@@ -43,17 +44,29 @@ async def async_setup(hass: HomeAssistant, config: ConfigType):
             
             _LOGGER.debug(f"Running pipeline for device {device_id} with UID {device_data['uid']}")
         
-        # Store control flags in context for pipeline stages
-        context = call.context.copy() if call.context else Context()
+        # Create a new context instead of trying to copy the existing one
+        # Home Assistant's Context doesn't have a copy method
+        context = Context()
         
-        # Create extra_data if it doesn't exist
+        # Store extra data as attributes on the context object
         if not hasattr(context, "extra_data"):
             context.extra_data = {}
         
+        # Store our control parameters in the context
         context.extra_data.update({
             "start_stage": start_stage,
             "request_followup": request_followup,
         })
+        
+        # If text_input is provided and we're starting at intent stage, add it to assist options
+        if text_input and start_stage == "intent":
+            _LOGGER.debug(f"Setting text input for intent stage: {text_input}")
+            # Make sure we have an assist dictionary
+            if "assist" not in run_options:
+                run_options["assist"] = {}
+            
+            # Add intent_input directly to the assist options
+            run_options["assist"]["intent_input"] = text_input
 
         try:
             # Only start stream if needed based on start_stage

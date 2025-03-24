@@ -67,6 +67,13 @@ run:
         device:
           integration: omni_assist
 
+    text_input:
+      name: Text Input
+      description: Text to process (only used when start_stage is 'intent')
+      example: "Turn on the kitchen lights"
+      selector:
+        text:
+
     start_stage:
       name: Start Stage
       description: The pipeline stage to start from (default follows device configuration)

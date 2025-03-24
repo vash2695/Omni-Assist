@@ -43,6 +43,11 @@ async def async_setup(hass: HomeAssistant, config: ConfigType):
                 # Get the device's UID for proper event routing
                 run_options["device_uid"] = device_data["uid"]
                 
+                # If no conversation_id was provided but the device has a last_conversation_id, use it
+                if not conversation_id and "last_conversation_id" in device_data:
+                    conversation_id = device_data["last_conversation_id"]
+                    _LOGGER.debug(f"Using last known conversation_id for device: {conversation_id}")
+                
                 _LOGGER.debug(f"Running pipeline for device {device_id} with UID {device_data['uid']}")
             elif device_id:
                 _LOGGER.error(f"Device ID {device_id} not found in registry")
@@ -55,6 +60,10 @@ async def async_setup(hass: HomeAssistant, config: ConfigType):
             # store the control parameters in the run_options dictionary
             run_options["_start_stage"] = start_stage
             run_options["_request_followup"] = request_followup
+            
+            # Log follow-up request if it's enabled
+            if request_followup:
+                _LOGGER.debug(f"Service call requesting follow-up after TTS (request_followup={request_followup})")
             
             # If text_input is provided and we're starting at intent stage, add it to assist options
             if text_input and start_stage == "intent":

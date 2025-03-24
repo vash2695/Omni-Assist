@@ -285,14 +285,19 @@ async def assist_run(
                 if event_callback:
                     # Forcefully dispatch TTS running state immediately
                     _LOGGER.debug("TTS ended, explicitly setting TTS entity to running state")
+                    running_event_data = {
+                        "message": "TTS playback in progress",
+                        "timestamp": time.time(),
+                        "tts_output": tts,
+                    }
+                    
+                    # Make sure device_uid is included if available
+                    if device_uid:
+                        running_event_data["device_uid"] = device_uid
+                        
                     running_event = PipelineEvent(
                         "tts-running",
-                        {
-                            "message": "TTS playback in progress",
-                            "timestamp": time.time(),
-                            "tts_output": tts,
-                            "device_uid": device_uid
-                        }
+                        running_event_data
                     )
                     event_callback(running_event)
 
@@ -324,6 +329,10 @@ async def assist_run(
                             "timestamp": time.time(),
                             "request_followup": request_followup,
                         }
+                        
+                        # Log follow-up request state
+                        if request_followup:
+                            _LOGGER.debug(f"Requesting follow-up after TTS playback (request_followup={request_followup})")
                         
                         # Only add conversation_id if it exists
                         if conversation_id:

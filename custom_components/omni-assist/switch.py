@@ -84,6 +84,12 @@ class OmniAssistSwitch(SwitchEntity):
                 conversation_id = None
                 if event.data:
                     conversation_id = event.data.get("conversation_id")
+                    
+                # If no conversation_id in event but we have one in registry, use that
+                if not conversation_id and self.device_entry.id in OMNI_ASSIST_REGISTRY:
+                    if "last_conversation_id" in OMNI_ASSIST_REGISTRY[self.device_entry.id]:
+                        conversation_id = OMNI_ASSIST_REGISTRY[self.device_entry.id]["last_conversation_id"]
+                        _LOGGER.debug(f"Using last conversation_id from registry: {conversation_id}")
                 
                 # Prepare service call to start new pipeline
                 service_data = {
@@ -229,6 +235,17 @@ class OmniAssistSwitch(SwitchEntity):
                     )
                 # Ignore wake-start events as we manage wake state differently
                 return
+            
+            # Store conversation_id if this is intent-end event
+            if stage == "intent" and state == "end" and event.data:
+                intent_output = event.data.get("intent_output", {})
+                if isinstance(intent_output, dict) and "conversation_id" in intent_output:
+                    conversation_id = intent_output.get("conversation_id")
+                    if conversation_id:
+                        _LOGGER.debug(f"Storing conversation_id: {conversation_id}")
+                        # Update the registry with the latest conversation_id
+                        if self.device_entry.id in OMNI_ASSIST_REGISTRY:
+                            OMNI_ASSIST_REGISTRY[self.device_entry.id]["last_conversation_id"] = conversation_id
                 
             _LOGGER.debug(f"Dispatching mapped event: {self.uid}-{stage}, state: {state}")
             self.hass.loop.call_soon_threadsafe(

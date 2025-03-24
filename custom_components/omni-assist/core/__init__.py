@@ -341,7 +341,8 @@ async def assist_run(
                         # Only add device_uid if it exists
                         if device_uid:
                             reset_data["device_uid"] = device_uid
-                            
+                        
+                        # Create actual event with a custom type for entity state management
                         reset_event = PipelineEvent(
                             "reset-after-tts", 
                             reset_data
@@ -351,9 +352,6 @@ async def assist_run(
                     # No longer simulating wake word detection after TTS playback
                     # This allows the wake entity to remain in "start" state
                     _LOGGER.debug("TTS playback complete, system ready for next interaction")
-                    
-                    # Don't generate a wake_word_event, let the real wake word detector handle it
-                    # This prevents the immediate transition back to "end" state
 
                 # Schedule an async task to simulate wake word and continue pipeline
                 hass.create_task(simulate_wake_word_and_continue())
@@ -393,6 +391,64 @@ async def assist_run(
         # 4. Validate Pipeline
         await pipeline_input.validate()
 
+        # Create custom pipeline start event
+        if event_callback:
+            # Include device_uid in the run-start event
+            start_data = {
+                "pipeline": pipeline.id,
+                "language": pipeline.language,
+                "conversation_id": conversation_id
+            }
+            if device_uid:
+                start_data["device_uid"] = device_uid
+
+            # Log start stage for explicit tracking
+            if "start_stage" in assist:
+                start_stage_name = str(assist["start_stage"]).split(".")[-1].lower()
+                _LOGGER.debug(f"Starting pipeline at stage: {start_stage_name}")
+                # Add this to event data
+                start_data["start_stage"] = start_stage_name
+
+            run_start_event = PipelineEvent(
+                "run-start",
+                start_data
+            )
+            event_callback(run_start_event)
+
+            # If starting from a specific stage, create synthetic events for that stage
+            if assist["start_stage"] == PipelineStage.STT:
+                # Create synthetic stt-start event for proper entity tracking
+                stt_start_data = {
+                    "engine": pipeline.stt_engine,
+                    "metadata": pipeline_input.stt_metadata.__dict__
+                }
+                if device_uid:
+                    stt_start_data["device_uid"] = device_uid
+                
+                stt_start_event = PipelineEvent(
+                    "stt-start",
+                    stt_start_data
+                )
+                event_callback(stt_start_event)
+            elif assist["start_stage"] == PipelineStage.INTENT:
+                # Create synthetic intent-start event for proper entity tracking
+                intent_start_data = {
+                    "engine": pipeline.conversation_engine,
+                    "language": pipeline.language,
+                    "intent_input": assist.get("intent_input"),
+                    "conversation_id": conversation_id,
+                    "device_id": assist.get("device_id"),
+                    "prefer_local_intents": False
+                }
+                if device_uid:
+                    intent_start_data["device_uid"] = device_uid
+                
+                intent_start_event = PipelineEvent(
+                    "intent-start",
+                    intent_start_data
+                )
+                event_callback(intent_start_event)
+
         # 5. Run Stream (optional)
         if stt_stream:
             stt_stream.start()
@@ -405,6 +461,18 @@ async def assist_run(
         if PipelineEventType.INTENT_END in events:
             intent_output = events[PipelineEventType.INTENT_END].get('data', {}).get('intent_output', {})
             result_conversation_id = intent_output.get('conversation_id')
+
+        # Create custom pipeline end event
+        if event_callback:
+            end_data = None
+            if device_uid:
+                end_data = {"device_uid": device_uid}
+            
+            run_end_event = PipelineEvent(
+                "run-end",
+                end_data
+            )
+            event_callback(run_end_event)
 
         return {
             "events": events, 

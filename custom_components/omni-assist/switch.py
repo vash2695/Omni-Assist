@@ -1,5 +1,6 @@
 import logging
 from typing import Callable
+import time
 
 from homeassistant.components.assist_pipeline import PipelineEvent, PipelineEventType, PipelineStage
 from homeassistant.components.switch import SwitchEntity
@@ -33,6 +34,26 @@ class OmniAssistSwitch(SwitchEntity):
         self.options = config_entry.options.copy()
         self.uid = init_entity(self, "mic", config_entry)
         _LOGGER.debug(f"OmniAssistSwitch initialized with UID: {self.uid}")
+
+    def _reset_entity_states(self, wake_state="start"):
+        """Reset all entity states to their default values.
+        
+        Args:
+            wake_state: State to set the wake entity to (default: "start")
+        """
+        _LOGGER.debug(f"Resetting entity states. Setting wake to '{wake_state}'")
+        
+        # Set wake to specified state
+        self.hass.loop.call_soon_threadsafe(
+            async_dispatcher_send, self.hass, f"{self.uid}-wake", wake_state
+        )
+        
+        # Reset all other entities to idle
+        for entity in ["stt", "intent", "tts"]:
+            _LOGGER.debug(f"Resetting {entity} entity to idle")
+            self.hass.loop.call_soon_threadsafe(
+                async_dispatcher_send, self.hass, f"{self.uid}-{entity}", None
+            )
 
     def event_callback(self, event: PipelineEvent):
         _LOGGER.debug(f"Received pipeline event: {event.type}")
@@ -102,9 +123,17 @@ class OmniAssistSwitch(SwitchEntity):
                     
                 # If no conversation_id in event but we have one in registry, use that
                 if not conversation_id and self.device_entry.id in OMNI_ASSIST_REGISTRY:
-                    if "last_conversation_id" in OMNI_ASSIST_REGISTRY[self.device_entry.id]:
-                        conversation_id = OMNI_ASSIST_REGISTRY[self.device_entry.id]["last_conversation_id"]
-                        _LOGGER.debug(f"Using last conversation_id from registry: {conversation_id}")
+                    device_data = OMNI_ASSIST_REGISTRY[self.device_entry.id]
+                    if "last_conversation_id" in device_data:
+                        # Check if the conversation has timed out (300 seconds)
+                        current_time = time.time()
+                        last_update_time = device_data.get("conversation_timestamp", 0)
+                        
+                        if current_time - last_update_time <= 300:  # 5 minutes timeout
+                            conversation_id = device_data["last_conversation_id"]
+                            _LOGGER.debug(f"Using last conversation_id from registry: {conversation_id}")
+                        else:
+                            _LOGGER.debug(f"Conversation timed out (age: {current_time - last_update_time}s > 300s)")
                 
                 # Prepare service call to start new pipeline
                 service_data = {
@@ -144,48 +173,14 @@ class OmniAssistSwitch(SwitchEntity):
                     _LOGGER.error(f"Error calling follow-up service: {e}")
                 return
             
-            # If no follow-up, reset to normal state
-            # Reset wake to "start" state after TTS playback completes
-            self.hass.loop.call_soon_threadsafe(
-                async_dispatcher_send, self.hass, f"{self.uid}-wake", "start"
-            )
-            
-            # Reset all other entities to idle, including TTS
-            self.hass.loop.call_soon_threadsafe(
-                async_dispatcher_send, self.hass, f"{self.uid}-stt", None
-            )
-            self.hass.loop.call_soon_threadsafe(
-                async_dispatcher_send, self.hass, f"{self.uid}-intent", None
-            )
-            self.hass.loop.call_soon_threadsafe(
-                async_dispatcher_send, self.hass, f"{self.uid}-tts", None
-            )
+            # If no follow-up, reset entities to default states
+            self._reset_entity_states("start")
             return
         
         # Handle the custom reset-after-cancellation event
         if event.type == "reset-after-cancellation":
             _LOGGER.debug("Cancellation detected, resetting entity states")
-            
-            # Reset wake to "start" state after cancellation
-            _LOGGER.debug(f"Resetting wake entity to 'start' state after cancellation: {self.uid}-wake")
-            self.hass.loop.call_soon_threadsafe(
-                async_dispatcher_send, self.hass, f"{self.uid}-wake", "start"
-            )
-            
-            # Reset all other entities to idle
-            _LOGGER.debug(f"Resetting STT entity to idle after cancellation: {self.uid}-stt")
-            self.hass.loop.call_soon_threadsafe(
-                async_dispatcher_send, self.hass, f"{self.uid}-stt", None
-            )
-            _LOGGER.debug(f"Resetting intent entity to idle after cancellation: {self.uid}-intent")
-            self.hass.loop.call_soon_threadsafe(
-                async_dispatcher_send, self.hass, f"{self.uid}-intent", None
-            )
-            _LOGGER.debug(f"Resetting TTS entity to idle after cancellation: {self.uid}-tts")
-            self.hass.loop.call_soon_threadsafe(
-                async_dispatcher_send, self.hass, f"{self.uid}-tts", None
-            )
-            _LOGGER.debug("All entities reset after cancellation")
+            self._reset_entity_states("start")
             return
         
         # Handle run-start and run-end events - used for overall pipeline state tracking
@@ -213,8 +208,8 @@ class OmniAssistSwitch(SwitchEntity):
                 async_dispatcher_send, self.hass, f"{self.uid}-{stage}", "error", event.data
             )
             
-            # After an error, wake entity should return to "start" state
-            if stage != "wake":  # Only if the error wasn't in the wake stage
+            # After an error, wake entity should return to "start" state (except for wake errors)
+            if stage != "wake":
                 self.hass.loop.call_soon_threadsafe(
                     async_dispatcher_send, self.hass, f"{self.uid}-wake", "start"
                 )
@@ -248,14 +243,6 @@ class OmniAssistSwitch(SwitchEntity):
             # State resets will be handled by reset-after-tts event after playback completes
             return
             
-        # Handle explicit tts-running event
-        if event.type == "tts-running":
-            _LOGGER.debug("Explicit TTS running event received, setting TTS entity to running state")
-            self.hass.loop.call_soon_threadsafe(
-                async_dispatcher_send, self.hass, f"{self.uid}-tts", "running", event.data
-            )
-            return
-        
         # Process normal pipeline events
         evt_type = event.type
         if evt_type in event_type_mapping:
@@ -284,6 +271,8 @@ class OmniAssistSwitch(SwitchEntity):
                         # Update the registry with the latest conversation_id
                         if self.device_entry.id in OMNI_ASSIST_REGISTRY:
                             OMNI_ASSIST_REGISTRY[self.device_entry.id]["last_conversation_id"] = conversation_id
+                            # Also store the timestamp when this conversation_id was updated
+                            OMNI_ASSIST_REGISTRY[self.device_entry.id]["conversation_timestamp"] = time.time()
                 
             _LOGGER.debug(f"Dispatching mapped event: {self.uid}-{stage}, state: {state}")
             self.hass.loop.call_soon_threadsafe(
@@ -299,10 +288,10 @@ class OmniAssistSwitch(SwitchEntity):
                     # Convert wake_word to wake
                     stage = "wake" if raw_stage == "wake_word" else raw_stage
                     
-                    # Special handling for wake events
+                    # Use the same special handling for wake events that we use above
                     if stage == "wake":
                         if state == "end":
-                            _LOGGER.debug(f"Wake word detected (raw event), setting wake to end state")
+                            _LOGGER.debug(f"Wake word detected (from raw event), setting wake to end state")
                             self.hass.loop.call_soon_threadsafe(
                                 async_dispatcher_send, self.hass, f"{self.uid}-{stage}", "end", event.data
                             )
@@ -328,7 +317,8 @@ class OmniAssistSwitch(SwitchEntity):
             "switch": self,
             "uid": self.uid,
             "options": self.options.copy(),
-            "request_followup": False  # Initialize follow-up flag
+            "request_followup": False,  # Initialize follow-up flag
+            "conversation_timestamp": 0  # Initialize conversation timestamp
         }
         _LOGGER.debug(f"Registered device in OMNI_ASSIST_REGISTRY with ID: {self.device_entry.id}")
 
@@ -342,15 +332,8 @@ class OmniAssistSwitch(SwitchEntity):
         self._async_write_ha_state()
         _LOGGER.debug("Set OmniAssistSwitch state to on")
 
-        # Set all entities to idle initially
-        for event in EVENTS:
-            _LOGGER.debug(f"Dispatching initial state for: {self.uid}-{event}")
-            if event == "wake":
-                # Wake entity should show "start" when mic is on but pipeline isn't active
-                async_dispatcher_send(self.hass, f"{self.uid}-{event}", "start")
-            else:
-                # Other entities remain idle
-                async_dispatcher_send(self.hass, f"{self.uid}-{event}", None)
+        # Set wake to "start" and other entities to idle initially
+        self._reset_entity_states("start")
 
         try:
             _LOGGER.debug("Calling run_forever")
@@ -382,9 +365,7 @@ class OmniAssistSwitch(SwitchEntity):
         _LOGGER.debug("Set OmniAssistSwitch state to off")
 
         # Reset all sensor entities to IDLE state when switch is off
-        for event in EVENTS:
-            _LOGGER.debug(f"Resetting entity state for: {self.uid}-{event}")
-            async_dispatcher_send(self.hass, f"{self.uid}-{event}", None)
+        self._reset_entity_states(None)  # Set wake to None (idle) when turning off
 
         if self.on_close is not None:
             try:

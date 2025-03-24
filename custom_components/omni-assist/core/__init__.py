@@ -281,37 +281,18 @@ async def assist_run(
                 tts = event.data["tts_output"]
                 tts_url = tts["url"]
 
-                # Ensure the TTS entity transitions to "running" state
-                if event_callback:
-                    # Forcefully dispatch TTS running state immediately
-                    _LOGGER.debug("TTS ended, explicitly setting TTS entity to running state")
-                    running_event_data = {
-                        "message": "TTS playback in progress",
-                        "timestamp": time.time(),
-                        "tts_output": tts,
-                    }
-                    
-                    # Make sure device_uid is included if available
-                    if device_uid:
-                        running_event_data["device_uid"] = device_uid
-                        
-                    # Include request_followup flag if it's set
-                    if request_followup:
-                        running_event_data["request_followup"] = request_followup
-                        
-                    running_event = PipelineEvent(
-                        "tts-running",
-                        running_event_data
-                    )
-                    event_callback(running_event)
+                # Add request_followup flag to TTS_END event data if needed
+                if request_followup and event.data:
+                    event.data["request_followup"] = request_followup
+                    _LOGGER.debug(f"Added request_followup={request_followup} to TTS_END event data")
 
-                async def simulate_wake_word_and_continue():
+                async def handle_tts_completion_and_followup():
                     duration = await get_tts_duration(hass, tts_url)
                     if PipelineEventType.TTS_END in events and events[PipelineEventType.TTS_END].get("data"):
                         events[PipelineEventType.TTS_END]["data"]["tts_duration"] = duration
                     _LOGGER.debug(f"Stored TTS duration: {duration} seconds")
                 
-                    # Set a timer to simulate wake word detection after TTS playback
+                    # Wait for TTS playback to complete
                     await asyncio.sleep(duration)
                     await asyncio.sleep(1)  # Additional small delay
                 
@@ -363,12 +344,11 @@ async def assist_run(
                         except Exception as e:
                             _LOGGER.error(f"Error sending reset-after-tts event: {e}")
                 
-                    # No longer simulating wake word detection after TTS playback
-                    # This allows the wake entity to remain in "start" state
+                    # TTS playback complete, ready for next interaction
                     _LOGGER.debug("TTS playback complete, system ready for next interaction")
 
-                # Schedule an async task to simulate wake word and continue pipeline
-                hass.create_task(simulate_wake_word_and_continue())
+                # Schedule an async task to handle TTS completion and follow-up
+                hass.create_task(handle_tts_completion_and_followup())
                 play_media(hass, player_entity_id, tts["url"], tts["mime_type"])
 
     pipeline_run = PipelineRun(
@@ -533,9 +513,9 @@ def run_forever(
             await asyncio.sleep(30)
 
     async def run_assist():
-        conversation_id = None
-        last_interaction_time = None
-        waiting_for_next_interaction = True  # Flag to track if waiting for next interaction
+        # We'll use the registry for conversation ID tracking instead of local variables
+        # Get device_id from data for registry lookup
+        device_id = data.get("device_id")
         consecutive_errors = 0  # Track consecutive errors
         last_error_time = None  # Track when the last error occurred
         
@@ -543,9 +523,13 @@ def run_forever(
             try:
                 current_time = time.time()
                 
-                # Reset conversation context if too much time has passed
-                if last_interaction_time and current_time - last_interaction_time > 300:
-                    conversation_id = None
+                # Get conversation_id from registry if available
+                conversation_id = None
+                if device_id and device_id in OMNI_ASSIST_REGISTRY:
+                    device_data = OMNI_ASSIST_REGISTRY[device_id]
+                    if "last_conversation_id" in device_data:
+                        conversation_id = device_data["last_conversation_id"]
+                        _LOGGER.debug(f"Using conversation_id from registry: {conversation_id}")
                 
                 # Implement progressive backoff for errors
                 if consecutive_errors > 0:
@@ -572,7 +556,7 @@ def run_forever(
                 
                 # Check if an error occurred
                 had_error = False
-                for event_type in result["events"]:
+                for event_type in result.get("events", {}):
                     if event_type == PipelineEventType.ERROR:
                         had_error = True
                         consecutive_errors += 1
@@ -585,14 +569,8 @@ def run_forever(
                 if not had_error:
                     consecutive_errors = 0
                 
-                # Update conversation tracking
-                new_conversation_id = result.get("conversation_id")
-                if new_conversation_id:
-                    conversation_id = new_conversation_id
-                    last_interaction_time = current_time
-                    waiting_for_next_interaction = False  # Actively in a conversation
-                
-                _LOGGER.debug(f"Conversation ID: {conversation_id}")
+                # No need to manually update conversation_id here as it's handled by event handlers
+                # that store it in the registry
                 
                 # Short delay before next processing cycle
                 # This allows other asyncio tasks to run

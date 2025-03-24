@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import time
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -46,8 +47,15 @@ async def async_setup(hass: HomeAssistant, config: ConfigType):
                 
                 # If no conversation_id was provided but the device has a last_conversation_id, use it
                 if not conversation_id and "last_conversation_id" in device_data:
-                    conversation_id = device_data["last_conversation_id"]
-                    _LOGGER.debug(f"Using last known conversation_id for device: {conversation_id}")
+                    # Check if the conversation has timed out (300 seconds)
+                    current_time = time.time()
+                    last_update_time = device_data.get("conversation_timestamp", 0)
+                    
+                    if current_time - last_update_time <= 300:  # 5 minutes timeout
+                        conversation_id = device_data["last_conversation_id"]
+                        _LOGGER.debug(f"Using last known conversation_id for device: {conversation_id}")
+                    else:
+                        _LOGGER.debug(f"Conversation timed out (age: {current_time - last_update_time}s > 300s)")
                 
                 # Store follow-up flag in the registry for thread-safe access
                 device_data["request_followup"] = request_followup

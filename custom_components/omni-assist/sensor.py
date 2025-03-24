@@ -73,6 +73,22 @@ class OmniAssistSensor(SensorEntity):
         _LOGGER.debug(f"Adding stage-specific dispatcher for {stage_signal}")
         remove_stage = async_dispatcher_connect(self.hass, stage_signal, self.signal)
         self.async_on_remove(remove_stage)
+        
+        # Track that this entity was fully initialized
+        self._attr_available = True
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Handle entity removal from hass."""
+        _LOGGER.debug(f"Removing sensor {self.unique_id} for stage {self.key}")
+        # The base implementation of async_on_remove handles calling all callbacks registered
+        # with self.async_on_remove(), so we don't need to manually call our remove callbacks
+        
+        # Just for safety, explicitly mark this entity as unavailable
+        self._attr_available = False
+        
+        # Clear any stored attributes
+        self._attr_extra_state_attributes = None
+        self._attr_native_value = STATE_IDLE
 
     def signal(self, value: str, extra: dict = None):
         _LOGGER.debug(f"Sensor {self.unique_id} received signal: {value} with extra: {extra}")

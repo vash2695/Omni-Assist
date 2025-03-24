@@ -479,6 +479,13 @@ async def assist_run(
             )
             event_callback(run_end_event)
 
+        # No need to manually update conversation_id here as it's handled by event handlers
+        # that store it in the registry
+        
+        # Log the result conversation ID for debugging purposes
+        if result_conversation_id:
+            _LOGGER.debug(f"Pipeline run completed with conversation_id: {result_conversation_id}")
+        
         return {
             "events": events, 
             "conversation_id": result_conversation_id,
@@ -528,8 +535,15 @@ def run_forever(
                 if device_id and device_id in OMNI_ASSIST_REGISTRY:
                     device_data = OMNI_ASSIST_REGISTRY[device_id]
                     if "last_conversation_id" in device_data:
-                        conversation_id = device_data["last_conversation_id"]
-                        _LOGGER.debug(f"Using conversation_id from registry: {conversation_id}")
+                        # Check if the conversation has timed out (300 seconds)
+                        current_time = time.time()
+                        last_update_time = device_data.get("conversation_timestamp", 0)
+                        
+                        if current_time - last_update_time <= 300:  # 5 minutes timeout
+                            conversation_id = device_data["last_conversation_id"]
+                            _LOGGER.debug(f"Using conversation_id from registry: {conversation_id} (age: {current_time - last_update_time}s)")
+                        else:
+                            _LOGGER.debug(f"Conversation timed out (age: {current_time - last_update_time}s > 300s), starting new conversation")
                 
                 # Implement progressive backoff for errors
                 if consecutive_errors > 0:
@@ -571,6 +585,11 @@ def run_forever(
                 
                 # No need to manually update conversation_id here as it's handled by event handlers
                 # that store it in the registry
+                
+                # Log the result conversation ID for debugging purposes
+                result_conversation_id = result.get("conversation_id")
+                if result_conversation_id:
+                    _LOGGER.debug(f"Pipeline run completed with conversation_id: {result_conversation_id}")
                 
                 # Short delay before next processing cycle
                 # This allows other asyncio tasks to run

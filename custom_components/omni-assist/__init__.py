@@ -103,6 +103,15 @@ async def async_setup(hass: HomeAssistant, config: ConfigType):
                     stt_stream=stt_stream,
                     conversation_id=conversation_id
                 )
+                
+                # Log the conversation ID from the result for debugging
+                if result_conversation_id := result.get("conversation_id"):
+                    _LOGGER.debug(f"Service call completed with conversation_id: {result_conversation_id}")
+                    
+                    # If this is a new conversation ID and different from what we passed in, log that too
+                    if result_conversation_id != conversation_id:
+                        _LOGGER.debug(f"New conversation started (old: {conversation_id}, new: {result_conversation_id})")
+                
                 return result
             except asyncio.CancelledError:
                 _LOGGER.debug("Service call was cancelled before completion")

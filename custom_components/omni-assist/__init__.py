@@ -83,6 +83,10 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     # Set up Wyoming satellite if enabled
     if config_entry.options.get("enable_wyoming_satellite", True):
         try:
+            # Try to import Wyoming to check if it's available
+            import homeassistant.components.wyoming
+            _LOGGER.debug("Wyoming integration is available")
+            
             device_id = config_entry.entry_id[:7]
             port = config_entry.options.get("wyoming_port", 10700)
             
@@ -95,9 +99,10 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
             if success:
                 # Store satellite reference for later use
                 hass.data[DOMAIN][config_entry.entry_id]["satellite"] = satellite
-                _LOGGER.info(f"Wyoming virtual satellite started successfully on port {port}")
             else:
-                _LOGGER.warning(f"Failed to start Wyoming virtual satellite on port {port}")
+                _LOGGER.warning("Failed to start Wyoming virtual satellite")
+        except ImportError:
+            _LOGGER.warning("Wyoming integration not installed - satellite functionality disabled")
         except Exception as e:
             _LOGGER.error(f"Error setting up Wyoming satellite: {e}", exc_info=e)
     

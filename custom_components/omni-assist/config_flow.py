@@ -55,69 +55,88 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
 
     @staticmethod
     @callback
-    def async_get_options_flow(entry: ConfigEntry):
-        return OptionsFlowHandler(entry)
+    def async_get_options_flow(config_entry):
+        """Get the options flow for this handler."""
+        return OptionsFlowHandler(config_entry)
 
 
-class OptionsFlowHandler(OptionsFlow):
-    def __init__(self, config_entry: ConfigEntry):
+class OptionsFlowHandler(config_entries.OptionsFlow):
+    """Handle a option flow for Omni-Assist."""
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        """Initialize options flow."""
         self.config_entry = config_entry
+        self.options = dict(config_entry.options)
 
-    async def async_step_init(self, user_input: dict = None):
+    async def async_step_init(self, user_input=None):
+        """Handle options flow."""
         if user_input is not None:
+            # Toggle satellite mode if needed
+            if user_input.get("satellite_mode", False) != self.options.get("satellite_mode", False):
+                # If enabling satellite mode, make sure we have required fields
+                if user_input.get("satellite_mode", False):
+                    return await self.async_step_satellite()
+                
+            # Update options and return
             return self.async_create_entry(title="", data=user_input)
 
-        reg = entity_registry.async_get(self.hass)
-        cameras = [
-            k
-            for k, v in reg.entities.items()
-            if v.domain == "camera"
-            and v.supported_features & CameraEntityFeature.STREAM
-        ]
-        players = [
-            k
-            for k, v in reg.entities.items()
-            if v.domain == "media_player"
-            and v.supported_features & MediaPlayerEntityFeature.PLAY_MEDIA
-        ]
-
-        pipelines = {
-            p.id: p.name for p in assist_pipeline.async_get_pipelines(self.hass)
-        }
-
-        defaults = self.config_entry.options.copy()
+        # Get list of pipeline ids
+        pipelines = await get_pipelines(self.hass)
+        pipeline_ids = [p["id"] for p in pipelines]
         
-        # Add satellite mode configuration to options
-        schema = {
-            vol.Exclusive("stream_source", "url"): str,
-            vol.Exclusive("camera_entity_id", "url"): vol.In(cameras),
-            vol.Optional("player_entity_id"): cv.multi_select(players),
-            vol.Optional("stt_start_media"): str,
-            vol.Optional("stt_end_media"): str,
-            vol.Optional("stt_error_media"): str,
-            vol.Optional("pipeline_id"): vol.In(pipelines),
-            vol.Optional("satellite_mode", default=defaults.get("satellite_mode", False)): bool,
+        all_options = {
+            vol.Optional(
+                "satellite_mode",
+                default=self.options.get("satellite_mode", False),
+            ): bool,
+            vol.Optional(
+                "pipeline_id",
+                default=self.options.get("pipeline_id", ""),
+            ): vol.In([""] + pipeline_ids),
         }
-        
-        # Add additional satellite-specific configuration if satellite mode is enabled
-        if defaults.get("satellite_mode", False):
-            schema.update({
-                vol.Optional("satellite_room", default=defaults.get("satellite_room", "")): str,
-                vol.Optional("satellite_port", default=defaults.get("satellite_port", 10600)): int,
-                vol.Optional("noise_suppression_level", default=defaults.get("noise_suppression_level", 0)): vol.All(
-                    vol.Coerce(int), vol.Range(min=0, max=4)
-                ),
-                vol.Optional("auto_gain_dbfs", default=defaults.get("auto_gain_dbfs", 0)): vol.All(
-                    vol.Coerce(int), vol.Range(min=-31, max=0)
-                ),
-                vol.Optional("volume_multiplier", default=defaults.get("volume_multiplier", 1.0)): vol.All(
-                    vol.Coerce(float), vol.Range(min=0.1, max=5.0)
-                ),
-            })
-
+            
         return self.async_show_form(
-            step_id="init",
-            data_schema=vol_schema(schema, defaults),
+            step_id="init", data_schema=vol.Schema(all_options)
+        )
+        
+    async def async_step_satellite(self, user_input=None):
+        """Configure satellite options."""
+        errors = {}
+        
+        if user_input is not None:
+            # Validate port
+            try:
+                port = int(user_input.get("satellite_port", 10600))
+                
+                # Check if port is valid
+                if port < 1024 or port > 65535:
+                    errors["satellite_port"] = "invalid_port"
+                else:
+                    # Merge options from previous step
+                    merged_options = {**self.options, **user_input}
+                    
+                    # Make sure satellite_mode is enabled
+                    merged_options["satellite_mode"] = True
+                    
+                    return self.async_create_entry(title="", data=merged_options)
+            except ValueError:
+                errors["satellite_port"] = "invalid_port"
+                
+        schema = vol.Schema({
+            vol.Required(
+                "satellite_room",
+                default=self.options.get("satellite_room", ""),
+            ): str,
+            vol.Required(
+                "satellite_port",
+                default=self.options.get("satellite_port", 10600),
+            ): int,
+        })
+        
+        return self.async_show_form(
+            step_id="satellite", 
+            data_schema=schema,
+            errors=errors,
         )
 
 

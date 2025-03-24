@@ -4,65 +4,65 @@
 
 # NOTE: I make changes to this frequently that may break things! Use at your own risk.
 
-This fork is an attempt at implementing continued conversation and other features within Stream Assist.
+This rework is an attempt at implementing continued conversation and other features within Stream Assist.
 
 Features added so far:
 * Continued conversation: conversation_id is preserved between interactions for a given entry with a timeout of 300 seconds, though for now the timeout doesn't seem to work consistently
-* Wake Word skip: The wake word phase can be automatically skipped on follow-up interactions
-    * Still a work in progress, very buggy
 * STT End media: Now both the start and end of the STT phase have options for audio feedback. Also added a field for this in the config options
 * STT Error media: When there is an error in the STT phase (like no-text-recognized), a distinct error sound can be played
 * More initial config options: All available options are now in the initial config screen
 * Added cancel phrases like: "nevermind", "never mind", "thank you", "cancel that", "cancel",
     "abort", "quit", "exit", "end", "forget it", "that's all", "that is all" so that you can cancel the continuous conversation feature
+* Improved pipeline state tracking: Each stage of the pipeline is more accurately represented by the state sensors (wake, stt, intent, tts), with tts accurately representing the duration of playback instead of jumping immediately to 'end'
 
 Future goals:
 * Globally continued conversations: Add the option to pass conversation IDs across all integration entries
     * This would require the integration to also provide updated area and device information
-* Expose more of the integration to automations
-    * Example: A service call that allows you to select an integration entry and trigger the assistant pipeline at the intent phase with predefined data
+* Wake Word skip: Allow the wake word phase to be skipped on follow-up interactions
+* Expose the integration to automations - Attempting to do this via Virtual Satellite support
 
-## Virtual Satellite Mode
 
-Omni-Assist now includes full Wyoming Protocol support, allowing you to expose your integration instances as virtual satellites. This provides several benefits:
+Work in progress:
+## Virtual Satellite Support
 
-- **Multiple Pipeline Configurations**: Each satellite can have its own pipeline configuration
-- **Room Organization**: Satellites can be organized by room for easier management
-- **Custom Audio Processing**: Audio settings (noise suppression, auto gain, volume) can be customized per satellite
-- **Native Integration**: Works with Home Assistant's built-in satellite infrastructure
-- **Zeroconf Discovery**: Virtual satellites are automatically discovered by Home Assistant
+Omni-Assist now supports virtual satellites via the Wyoming Protocol. This allows you to create multiple instances of the integration, with some configured as satellites for different rooms.
 
-### How It Works
+### Key Features:
+- Configure any Omni-Assist instance as a satellite by enabling "Satellite Mode" in the integration options
+- Each satellite exposes a Wyoming Protocol server that can be discovered by Home Assistant
+- Status sensors for each satellite show the current state of wake word detection, speech processing, and more
+- Omni-Assist acts as a bridge between Wyoming and Home Assistant's Assist pipeline
 
-The virtual satellite feature implements the Wyoming Protocol, which is used by Home Assistant for voice satellite communication. Each Omni-Assist instance running in satellite mode:
+### Setting Up a Satellite
+1. Create a new Omni-Assist integration in Home Assistant
+2. In the integration options, enable "Satellite Mode"
+3. Specify a room name and port number for the satellite
+4. Select a pipeline to use for processing audio
 
-1. Opens a TCP server on the configured port
-2. Registers with Zeroconf for automatic discovery
-3. Handles Wyoming Protocol messages for audio input/output
-4. Connects to the Home Assistant assist pipeline
-5. Streams TTS responses back to connected clients
+Wyoming Protocol will handle all the complex details of managing the satellite, while Omni-Assist provides the bridge functionality to connect it to Home Assistant's pipeline.
 
-### Satellite Setup
+### Common Issues and Solutions
 
-1. Create a new Omni-Assist integration
-2. Enable "Satellite Mode" toggle
-3. Configure the satellite options:
-   - **Satellite Room**: Name of the room where the satellite is located (displayed in Home Assistant UI)
-   - **Satellite Port**: Port number for the Wyoming server (default: 10600)
-   - **Audio Settings**:
-     - **Noise Suppression Level**: 0-4 (0 = disabled)
-     - **Auto Gain (dBFS)**: -31 to 0 (0 = disabled)
-     - **Volume Multiplier**: 0.1 to 5.0 (1.0 = normal volume)
+If you encounter any of these issues with the virtual satellite implementation, here are the solutions:
 
-**Important**: Each satellite needs a unique port number.
+#### Zeroconf Registration Issues
+The integration now correctly awaits the Zeroconf instance acquisition and properly registers/unregisters services.
 
-### Using with Other Wyoming Clients
+#### Thread Safety Violations 
+State updates from different threads are now properly handled by using `hass.async_add_job` to schedule updates in the main event loop.
 
-These virtual satellites are also compatible with other Wyoming Protocol clients:
+#### Wyoming Protocol Errors
+Improved error handling for malformed JSON in the Wyoming Protocol communication, with better logging and error recovery.
 
-- Wyoming Satellite devices (like ESP32-based satellites)
-- Other Home Assistant instances
-- Rhasspy voice assistants
+#### Dispatcher Signal Handling
+Thread-safe dispatcher signal handling ensures proper state updates across the integration.
+
+## HACS Installation
+
+1. Add the Omni-Assist repo to HACS as a custom repository
+2. Install the "Omni-Assist" integration from HACS
+3. Restart Home Assistant
+4. Add the integration via the integrations page
 
 ## Installation
 

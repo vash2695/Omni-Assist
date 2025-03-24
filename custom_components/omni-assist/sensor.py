@@ -38,6 +38,7 @@ class StatusSensor(SensorEntity):
         self.uid = init_entity(self, key, config_entry)
         self.topic = f"{uid}-{key}"
         self.entry_id = config_entry.entry_id
+        self.hass = None
         
         # Add satellite-specific attributes if in satellite mode
         if is_satellite:
@@ -56,11 +57,13 @@ class StatusSensor(SensorEntity):
             self._attr_extra_state_attributes["is_satellite"] = True
 
     async def async_added_to_hass(self) -> None:
+        """When entity is added to hass."""
         self.async_on_remove(
             async_dispatcher_connect(self.hass, self.topic, self.update_state)
         )
 
     def update_state(self, state: str, data: dict[str, Any] = None) -> None:
+        """Update entity state in a thread-safe way."""
         self._attr_native_value = state
 
         if data:
@@ -68,4 +71,7 @@ class StatusSensor(SensorEntity):
         elif state is None:
             self._attr_extra_state_attributes = {}
 
-        self.async_write_ha_state()
+        # Use async_add_job to schedule the state update in the event loop
+        # This fixes the thread safety issue
+        if self.hass is not None:
+            self.hass.async_add_job(self.async_write_ha_state)

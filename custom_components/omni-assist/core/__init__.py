@@ -163,21 +163,29 @@ async def assist_run(
         # get default pipeline
         pipeline = assist_pipeline.async_get_pipeline(hass)
 
-    # Get start_stage from context if provided
-    if context and hasattr(context, "extra_data") and context.extra_data.get("start_stage"):
-        start_stage_str = context.extra_data.get("start_stage")
-        _LOGGER.debug(f"Using start_stage from context: {start_stage_str}")
+    # Get start_stage from data parameters instead of context
+    start_stage_str = data.get("_start_stage")
+    if start_stage_str:
+        _LOGGER.debug(f"Using start_stage from data: {start_stage_str}")
         
         # Map string stage name to PipelineStage enum
         if start_stage_str == "intent":
             assist["start_stage"] = PipelineStage.INTENT
             # Log intent input if present when starting from intent stage
             if intent_input := assist.get("intent_input"):
-                _LOGGER.debug(f"Starting from intent stage with input: {intent_input}")
+                _LOGGER.debug(f"Starting from intent stage with input: '{intent_input}'")
+            else:
+                _LOGGER.warning("Starting from intent stage but no intent_input provided")
         elif start_stage_str == "stt":
             assist["start_stage"] = PipelineStage.STT
+            _LOGGER.debug("Starting from STT stage")
         elif start_stage_str == "wake_word":
             assist["start_stage"] = PipelineStage.WAKE_WORD
+            _LOGGER.debug("Starting from wake_word stage")
+        else:
+            _LOGGER.warning(f"Unknown start_stage: {start_stage_str}, using default")
+    else:
+        _LOGGER.debug("No specific start_stage provided, using default based on pipeline capabilities")
     
     # Default start_stage handling if not overridden
     if "start_stage" not in assist:
@@ -198,6 +206,7 @@ async def assist_run(
 
     player_entity_id = data.get("player_entity_id")
     device_uid = data.get("device_uid")  # Get device_uid if provided
+    request_followup = data.get("_request_followup", False)  # Get request_followup from data
 
     # 2. Setup Pipeline Run
     events = {}
@@ -296,11 +305,6 @@ async def assist_run(
                     # Set a timer to simulate wake word detection after TTS playback
                     await asyncio.sleep(duration)
                     await asyncio.sleep(1)  # Additional small delay
-                
-                    # Check if we should request a follow-up
-                    request_followup = False
-                    if context and hasattr(context, "extra_data"):
-                        request_followup = context.extra_data.get("request_followup", False)
                 
                     # After TTS playback completes, reset entity states
                     if event_callback:

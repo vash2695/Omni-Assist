@@ -20,55 +20,54 @@ OMNI_ASSIST_REGISTRY = {}
 async def async_setup(hass: HomeAssistant, config: ConfigType):
     async def run(call: ServiceCall) -> ServiceResponse:
         stt_stream = Stream()
-        device_id = call.data.get("device_id")
-        start_stage = call.data.get("start_stage")
-        request_followup = call.data.get("request_followup", False)
-        conversation_id = call.data.get("conversation_id")
-        text_input = call.data.get("text_input")
-        
-        # Get run options - either from specified device or from call data
-        run_options = call.data.copy()
-        
-        # If a device ID is specified, use that device's configuration as a base
-        # and merge any explicitly specified options
-        if device_id and device_id in OMNI_ASSIST_REGISTRY:
-            device_data = OMNI_ASSIST_REGISTRY[device_id]
-            # Start with the device's own options
-            base_options = device_data["options"].copy()
-            # Override with any explicitly provided options
-            base_options.update(run_options)
-            run_options = base_options
-            
-            # Get the device's UID for proper event routing
-            run_options["device_uid"] = device_data["uid"]
-            
-            _LOGGER.debug(f"Running pipeline for device {device_id} with UID {device_data['uid']}")
-        
-        # Create a new context instead of trying to copy the existing one
-        # Home Assistant's Context doesn't have a copy method
-        context = Context()
-        
-        # Store extra data as attributes on the context object
-        if not hasattr(context, "extra_data"):
-            context.extra_data = {}
-        
-        # Store our control parameters in the context
-        context.extra_data.update({
-            "start_stage": start_stage,
-            "request_followup": request_followup,
-        })
-        
-        # If text_input is provided and we're starting at intent stage, add it to assist options
-        if text_input and start_stage == "intent":
-            _LOGGER.debug(f"Setting text input for intent stage: {text_input}")
-            # Make sure we have an assist dictionary
-            if "assist" not in run_options:
-                run_options["assist"] = {}
-            
-            # Add intent_input directly to the assist options
-            run_options["assist"]["intent_input"] = text_input
-
         try:
+            device_id = call.data.get("device_id")
+            start_stage = call.data.get("start_stage")
+            request_followup = call.data.get("request_followup", False)
+            conversation_id = call.data.get("conversation_id")
+            text_input = call.data.get("text_input")
+            
+            # Get run options - either from specified device or from call data
+            run_options = call.data.copy()
+            
+            # If a device ID is specified, use that device's configuration as a base
+            # and merge any explicitly specified options
+            if device_id and device_id in OMNI_ASSIST_REGISTRY:
+                device_data = OMNI_ASSIST_REGISTRY[device_id]
+                # Start with the device's own options
+                base_options = device_data["options"].copy()
+                # Override with any explicitly provided options
+                base_options.update(run_options)
+                run_options = base_options
+                
+                # Get the device's UID for proper event routing
+                run_options["device_uid"] = device_data["uid"]
+                
+                _LOGGER.debug(f"Running pipeline for device {device_id} with UID {device_data['uid']}")
+            elif device_id:
+                _LOGGER.error(f"Device ID {device_id} not found in registry")
+                return {"error": {"type": "device_not_found", "message": f"Device ID {device_id} not found"}}
+            
+            # Create a new context
+            context = Context()
+            
+            # Instead of trying to set attributes on the Context object,
+            # store the control parameters in the run_options dictionary
+            run_options["_start_stage"] = start_stage
+            run_options["_request_followup"] = request_followup
+            
+            # If text_input is provided and we're starting at intent stage, add it to assist options
+            if text_input and start_stage == "intent":
+                _LOGGER.debug(f"Setting text input for intent stage: {text_input}")
+                # Make sure we have an assist dictionary
+                if "assist" not in run_options:
+                    run_options["assist"] = {}
+                
+                # Add intent_input directly to the assist options
+                run_options["assist"]["intent_input"] = text_input
+            elif text_input and start_stage != "intent":
+                _LOGGER.warning(f"text_input provided but start_stage is '{start_stage}', not 'intent'. Ignoring text_input.")
+
             # Only start stream if needed based on start_stage
             if not start_stage or start_stage in ("wake_word", "stt"):
                 coro = stream_run(hass, run_options, stt_stream=stt_stream)
@@ -82,10 +81,11 @@ async def async_setup(hass: HomeAssistant, config: ConfigType):
                 conversation_id=conversation_id
             )
         except Exception as e:
-            _LOGGER.error("omni_assist.run", exc_info=e)
+            _LOGGER.error("Error in omni_assist.run service", exc_info=e)
             return {"error": {"type": str(type(e)), "message": str(e)}}
         finally:
-            stt_stream.close()
+            if stt_stream:
+                stt_stream.close()
 
     hass.services.async_register(
         DOMAIN, "run", run, supports_response=SupportsResponse.OPTIONAL

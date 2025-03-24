@@ -97,11 +97,15 @@ class OmniAssistSwitch(SwitchEntity):
                     _LOGGER.debug(f"Continuing conversation with ID: {conversation_id}")
                 
                 # Call the omni_assist.run service to start a new pipeline
-                self.hass.async_create_task(
-                    self.hass.services.async_call(
-                        DOMAIN, "run", service_data, blocking=False
+                try:
+                    _LOGGER.debug(f"Calling omni_assist.run service for follow-up with data: {service_data}")
+                    self.hass.async_create_task(
+                        self.hass.services.async_call(
+                            DOMAIN, "run", service_data, blocking=False
+                        )
                     )
-                )
+                except Exception as e:
+                    _LOGGER.error(f"Error calling follow-up service: {e}")
                 return
             
             # If no follow-up, reset to normal state

@@ -122,12 +122,23 @@ class OmniAssistSwitch(SwitchEntity):
                 try:
                     _LOGGER.debug(f"Calling omni_assist.run service for follow-up with data: {service_data}")
                     # Use call_later to make sure reset event is fully processed before starting new pipeline
+                    
+                    # Define a proper async callback to handle the service call
+                    async def start_follow_up(_):
+                        """Start the follow-up pipeline with proper async handling."""
+                        try:
+                            await self.hass.services.async_call(
+                                DOMAIN, "run", service_data, blocking=True
+                            )
+                            _LOGGER.debug("Follow-up service call completed")
+                        except Exception as err:
+                            _LOGGER.error(f"Error in follow-up service call: {err}")
+                    
+                    # Schedule the async follow-up with proper awaiting
                     async_call_later(
                         self.hass,
                         0.5,  # Half-second delay
-                        lambda _: self.hass.services.async_call(
-                            DOMAIN, "run", service_data, blocking=False
-                        )
+                        start_follow_up
                     )
                 except Exception as e:
                     _LOGGER.error(f"Error calling follow-up service: {e}")

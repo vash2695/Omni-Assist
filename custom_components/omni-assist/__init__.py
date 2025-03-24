@@ -1,4 +1,5 @@
 import logging
+import asyncio
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -81,21 +82,26 @@ async def async_setup(hass: HomeAssistant, config: ConfigType):
             elif text_input and start_stage != "intent":
                 _LOGGER.warning(f"text_input provided but start_stage is '{start_stage}', not 'intent'. Ignoring text_input.")
 
-            # Only start stream if needed based on start_stage
-            if not start_stage or start_stage in ("wake_word", "stt"):
-                coro = stream_run(hass, run_options, stt_stream=stt_stream)
-                hass.async_create_task(coro)
+            try:
+                # Only start stream if needed based on start_stage
+                if not start_stage or start_stage in ("wake_word", "stt"):
+                    coro = stream_run(hass, run_options, stt_stream=stt_stream)
+                    hass.async_create_task(coro)
 
-            return await assist_run(
-                hass, 
-                run_options, 
-                context=context, 
-                stt_stream=stt_stream,
-                conversation_id=conversation_id
-            )
-        except Exception as e:
-            _LOGGER.error("Error in omni_assist.run service", exc_info=e)
-            return {"error": {"type": str(type(e)), "message": str(e)}}
+                result = await assist_run(
+                    hass, 
+                    run_options, 
+                    context=context, 
+                    stt_stream=stt_stream,
+                    conversation_id=conversation_id
+                )
+                return result
+            except asyncio.CancelledError:
+                _LOGGER.debug("Service call was cancelled before completion")
+                return {"error": {"type": "cancelled", "message": "Service call was cancelled"}}
+            except Exception as e:
+                _LOGGER.error("Error in omni_assist.run service", exc_info=e)
+                return {"error": {"type": str(type(e)), "message": str(e)}}
         finally:
             if stt_stream:
                 stt_stream.close()

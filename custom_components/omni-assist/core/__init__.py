@@ -345,12 +345,23 @@ async def assist_run(
                         if device_uid:
                             reset_data["device_uid"] = device_uid
                         
-                        # Create actual event with a custom type for entity state management
-                        reset_event = PipelineEvent(
-                            "reset-after-tts", 
-                            reset_data
-                        )
-                        event_callback(reset_event)
+                        try:
+                            # Create actual event with a custom type for entity state management
+                            reset_event = PipelineEvent(
+                                "reset-after-tts", 
+                                reset_data
+                            )
+                            
+                            # Ensure event callback is called in a thread-safe manner
+                            if hasattr(hass, "loop") and hass.loop:
+                                hass.loop.call_soon_threadsafe(event_callback, reset_event)
+                            else:
+                                event_callback(reset_event)
+                                
+                            # Give the event time to be processed before proceeding
+                            await asyncio.sleep(0.1)
+                        except Exception as e:
+                            _LOGGER.error(f"Error sending reset-after-tts event: {e}")
                 
                     # No longer simulating wake word detection after TTS playback
                     # This allows the wake entity to remain in "start" state

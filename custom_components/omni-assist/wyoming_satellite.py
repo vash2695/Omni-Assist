@@ -1,7 +1,9 @@
 """Wyoming Virtual Satellite implementation for Omni-Assist."""
+import asyncio
+import json
 import logging
 import socket
-from typing import Optional, Any
+from typing import Any, Dict, Optional
 
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
@@ -9,16 +11,13 @@ from homeassistant.exceptions import HomeAssistantError
 
 _LOGGER = logging.getLogger(__name__)
 
-# Check if Wyoming integration is available
-WYOMING_AVAILABLE = False
-try:
-    from homeassistant.components import wyoming
-    WYOMING_AVAILABLE = True
-except ImportError:
-    _LOGGER.warning("Wyoming integration not found. Satellite functionality will be disabled.")
+# Simple Wyoming protocol event types
+WYOMING_EVENT_PING = "ping"
+WYOMING_EVENT_PONG = "pong"
+WYOMING_EVENT_RUN_SATELLITE = "run-satellite"
 
 class OmniAssistWyomingSatellite:
-    """Wyoming protocol satellite for Omni-Assist."""
+    """Wyoming protocol satellite for Omni-Assist using minimal direct implementation."""
     
     def __init__(self, hass: HomeAssistant, device_id: str, config_entry: ConfigEntry):
         """Initialize the Wyoming satellite."""
@@ -28,34 +27,33 @@ class OmniAssistWyomingSatellite:
         self.server = None
         self.zeroconf = None
         self._server_task = None
+        self._server_socket = None
+        self._clients = set()
+        self._running = False
         
     async def start(self, host: str = "0.0.0.0", port: int = 10700) -> bool:
         """Start the Wyoming satellite server."""
-        # Check if Wyoming is available
-        if not WYOMING_AVAILABLE:
-            _LOGGER.error("Cannot start Wyoming satellite: Wyoming integration not installed")
-            return False
-            
         try:
-            # We import these here to avoid import errors if Wyoming isn't installed
-            from wyoming.server import AsyncServer
-            from wyoming.satellite import Satellite
-            
             # Check if port is already in use
             if self._port_in_use(host, port):
                 _LOGGER.error(f"Port {port} is already in use, cannot start Wyoming satellite")
                 return False
                 
-            # Initialize the server
+            # Create and start the server
             try:
-                self.server = AsyncServer.from_uri(f"tcp://{host}:{port}")
+                self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self._server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                self._server_socket.bind((host, port))
+                self._server_socket.listen(5)
+                self._server_socket.setblocking(False)
                 
-                # Register the satellite with Zeroconf using the correct IP
+                # Register with Zeroconf
                 self._register_zeroconf(host, port)
                 
                 # Start the server in a background task
+                self._running = True
                 self._server_task = self.hass.async_create_background_task(
-                    self.server.run(self._handle_connection), 
+                    self._run_server(),
                     "omni_assist_wyoming_server"
                 )
                 
@@ -64,59 +62,123 @@ class OmniAssistWyomingSatellite:
             except Exception as e:
                 _LOGGER.error(f"Failed to start Wyoming satellite server: {e}", exc_info=e)
                 return False
-        except ImportError as err:
-            _LOGGER.error(f"Wyoming packages not available: {err}")
+        except Exception as e:
+            _LOGGER.error(f"Error in Wyoming satellite startup: {e}", exc_info=e)
             return False
     
-    async def _handle_connection(self, connection):
-        """Handle incoming Wyoming protocol connections with proper event loop."""
-        try:
-            # Import Wyoming classes only when needed
-            from wyoming.satellite import RunSatellite, Ping, Pong
-            
-            _LOGGER.debug(f"New Wyoming connection established: {connection}")
-            
+    async def _run_server(self):
+        """Main server loop for accepting connections."""
+        loop = asyncio.get_event_loop()
+        
+        while self._running:
             try:
-                while True:
-                    event = await connection.read_event()
-                    
-                    if event is None:
-                        _LOGGER.debug("Connection closed by client")
-                        break
-                        
-                    _LOGGER.debug(f"Received Wyoming event: {event.type}")
-                    
-                    if isinstance(event, RunSatellite):
-                        # Extract pipeline parameters
-                        pipeline_id = event.data.get("pipeline_id")
-                        conversation_id = event.data.get("conversation_id")
-                        extra_system_message = event.data.get("extra_system_message", "")
-                        
-                        _LOGGER.info(f"Running pipeline {pipeline_id} via Wyoming satellite")
-                        
-                        # Trigger Omni-Assist's internal pipeline mechanism
-                        await self.hass.services.async_call(
-                            "omni_assist", 
-                            "run",
-                            {
-                                "pipeline_id": pipeline_id,
-                                "conversation_id": conversation_id,
-                                "extra_system_message": extra_system_message
-                            },
-                            blocking=False  # Non-blocking to prevent satellite connection issues
-                        )
-                    elif isinstance(event, Ping):
-                        # Respond to ping events to maintain connection
-                        await connection.write_event(Pong())
-                    else:
-                        _LOGGER.debug(f"Unhandled Wyoming event type: {event.type}")
+                client_socket, addr = await loop.sock_accept(self._server_socket)
+                client_socket.setblocking(False)
+                _LOGGER.debug(f"New Wyoming connection from {addr}")
+                
+                # Start a task to handle this client
+                client_task = asyncio.create_task(self._handle_client(client_socket, addr))
+                self._clients.add(client_task)
+                client_task.add_done_callback(self._clients.discard)
+                
             except Exception as e:
-                _LOGGER.error("Error in Wyoming connection handler", exc_info=e)
-            finally:
-                _LOGGER.debug("Wyoming connection handler terminated")
-        except ImportError as err:
-            _LOGGER.error(f"Wyoming packages not available in connection handler: {err}")
-            return
+                if self._running:  # Only log if we're supposed to be running
+                    _LOGGER.error(f"Error accepting Wyoming connection: {e}")
+                await asyncio.sleep(0.1)  # Prevent CPU spinning on errors
+    
+    async def _handle_client(self, client_socket, addr):
+        """Handle a client connection."""
+        loop = asyncio.get_event_loop()
+        
+        try:
+            buffer = b""
+            
+            while self._running:
+                # Read data
+                chunk = await loop.sock_recv(client_socket, 4096)
+                if not chunk:
+                    _LOGGER.debug(f"Client disconnected: {addr}")
+                    break
+                
+                buffer += chunk
+                
+                # Process complete Wyoming protocol messages from the buffer
+                while b"\n" in buffer:
+                    header_end = buffer.find(b"\n")
+                    header_bytes = buffer[:header_end]
+                    buffer = buffer[header_end + 1:]
+                    
+                    # Parse the header
+                    try:
+                        header = json.loads(header_bytes.decode("utf-8"))
+                        event_type = header.get("type")
+                        
+                        # Extract payload if there is one
+                        payload = None
+                        payload_length = header.get("payload_length", 0)
+                        if payload_length > 0:
+                            # If we don't have enough data yet, put the header back and wait for more
+                            if len(buffer) < payload_length:
+                                buffer = header_bytes + b"\n" + buffer
+                                break
+                            
+                            payload = buffer[:payload_length]
+                            buffer = buffer[payload_length:]
+                        
+                        # Handle the event
+                        await self._handle_event(client_socket, event_type, header, payload)
+                        
+                    except json.JSONDecodeError:
+                        _LOGGER.error(f"Invalid Wyoming protocol message: {header_bytes}")
+                        continue
+                    except Exception as e:
+                        _LOGGER.error(f"Error processing Wyoming message: {e}")
+                        continue
+                
+                # Yield to allow other tasks to run
+                await asyncio.sleep(0)
+                
+        except (ConnectionResetError, BrokenPipeError):
+            _LOGGER.debug(f"Client connection closed: {addr}")
+        except Exception as e:
+            _LOGGER.error(f"Error handling Wyoming client: {e}", exc_info=e)
+        finally:
+            try:
+                client_socket.close()
+            except:
+                pass
+    
+    async def _handle_event(self, client_socket, event_type, header, payload):
+        """Handle a Wyoming protocol event."""
+        loop = asyncio.get_event_loop()
+        
+        if event_type == WYOMING_EVENT_PING:
+            # Respond with a pong
+            pong = {"type": WYOMING_EVENT_PONG}
+            await loop.sock_sendall(client_socket, json.dumps(pong).encode("utf-8") + b"\n")
+            
+        elif event_type == WYOMING_EVENT_RUN_SATELLITE:
+            # Extract data from the event
+            data = header.get("data", {})
+            pipeline_id = data.get("pipeline_id")
+            conversation_id = data.get("conversation_id")
+            extra_system_message = data.get("extra_system_message", "")
+            
+            _LOGGER.info(f"Running pipeline {pipeline_id} via Wyoming satellite")
+            
+            # Trigger Omni-Assist's internal pipeline mechanism
+            await self.hass.services.async_call(
+                "omni_assist", 
+                "run",
+                {
+                    "pipeline_id": pipeline_id,
+                    "conversation_id": conversation_id,
+                    "extra_system_message": extra_system_message
+                },
+                blocking=False  # Non-blocking to prevent satellite connection issues
+            )
+        else:
+            _LOGGER.debug(f"Received unhandled Wyoming event type: {event_type}")
     
     def _port_in_use(self, host: str, port: int) -> bool:
         """Check if the specified port is already in use."""
@@ -158,23 +220,37 @@ class OmniAssistWyomingSatellite:
             _LOGGER.error(f"Zeroconf package not available: {err}")
             # Try to continue without Zeroconf - satellite will need to be manually configured
             _LOGGER.warning("Wyoming satellite will need to be manually configured as Zeroconf is unavailable")
+        except Exception as e:
+            _LOGGER.error(f"Error registering with Zeroconf: {e}", exc_info=e)
     
     async def stop(self) -> None:
         """Stop the Wyoming satellite server and clean up resources."""
         _LOGGER.info("Stopping Wyoming satellite server")
         
+        # Stop accepting new connections
+        self._running = False
+        
+        # Close the server socket
+        if self._server_socket:
+            try:
+                self._server_socket.close()
+            except Exception as e:
+                _LOGGER.error(f"Error closing server socket: {e}")
+            self._server_socket = None
+        
+        # Wait for all client connections to close
+        if self._clients:
+            wait_time = 2  # Wait up to 2 seconds for clients to disconnect
+            done, pending = await asyncio.wait(self._clients, timeout=wait_time)
+            if pending:
+                _LOGGER.warning(f"{len(pending)} Wyoming client connections did not close gracefully")
+        
         # Unregister from Zeroconf
         if self.zeroconf:
             _LOGGER.debug("Unregistering Wyoming satellite from Zeroconf")
-            self.zeroconf.unregister_all_services()
-            self.zeroconf.close()
-            self.zeroconf = None
-        
-        # Stop the server
-        if self.server:
-            _LOGGER.debug("Stopping Wyoming server")
-            await self.server.stop()
-            # Ensure server is fully closed
-            if hasattr(self.server, "wait_closed"):
-                await self.server.wait_closed()
-            self.server = None 
+            try:
+                self.zeroconf.unregister_all_services()
+                self.zeroconf.close()
+            except Exception as e:
+                _LOGGER.error(f"Error closing Zeroconf: {e}")
+            self.zeroconf = None 

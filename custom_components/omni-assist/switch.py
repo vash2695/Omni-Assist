@@ -146,6 +146,8 @@ class OmniAssistSwitch(SwitchEntity):
                 if conversation_id:
                     service_data["conversation_id"] = conversation_id
                     _LOGGER.debug(f"Continuing conversation with ID: {conversation_id}")
+                else:
+                    _LOGGER.debug("No conversation ID available for follow-up, will start new conversation")
                 
                 # Call the omni_assist.run service to start a new pipeline
                 try:
@@ -267,7 +269,16 @@ class OmniAssistSwitch(SwitchEntity):
                 if isinstance(intent_output, dict) and "conversation_id" in intent_output:
                     conversation_id = intent_output.get("conversation_id")
                     if conversation_id:
-                        _LOGGER.debug(f"Storing conversation_id: {conversation_id}")
+                        # Only log if we got a new conversation ID different from what's stored
+                        current_id = None
+                        if self.device_entry.id in OMNI_ASSIST_REGISTRY:
+                            current_id = OMNI_ASSIST_REGISTRY[self.device_entry.id].get("last_conversation_id")
+                            
+                        if current_id != conversation_id:
+                            _LOGGER.debug(f"Storing new conversation_id: {conversation_id} (previous: {current_id or 'None'})")
+                        else:
+                            _LOGGER.debug(f"Conversation ID unchanged: {conversation_id}")
+                        
                         # Update the registry with the latest conversation_id
                         if self.device_entry.id in OMNI_ASSIST_REGISTRY:
                             OMNI_ASSIST_REGISTRY[self.device_entry.id]["last_conversation_id"] = conversation_id

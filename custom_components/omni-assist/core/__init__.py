@@ -530,13 +530,27 @@ def run_forever(
             try:
                 current_time = time.time()
                 
-                # Get conversation_id from registry if available
+                # Create updated data with latest values from registry
+                updated_data = data.copy()  # Start with original data
                 conversation_id = None
+                
+                # Get latest data from registry if we have a device_id
                 if device_id and device_id in OMNI_ASSIST_REGISTRY:
                     device_data = OMNI_ASSIST_REGISTRY[device_id]
+                    
+                    # Add device_uid for proper event routing
+                    updated_data["device_uid"] = device_data.get("uid")
+                    
+                    # Update with the latest options from the registry
+                    if "options" in device_data:
+                        # Only update options that aren't already set in the current call
+                        for key, value in device_data["options"].items():
+                            if key not in updated_data:
+                                updated_data[key] = value
+                    
+                    # Check for conversation timeout
                     if "last_conversation_id" in device_data:
                         # Check if the conversation has timed out (300 seconds)
-                        current_time = time.time()
                         last_update_time = device_data.get("conversation_timestamp", 0)
                         
                         if current_time - last_update_time <= 300:  # 5 minutes timeout
@@ -558,10 +572,10 @@ def run_forever(
                     
                     _LOGGER.debug(f"Retrying after {consecutive_errors} consecutive errors, waited {wait_seconds}s")
                 
-                # Run the assist pipeline
+                # Run the assist pipeline with updated data and conversation ID
                 result = await assist_run(
                     hass,
-                    data,
+                    updated_data,  # Use updated data from registry
                     context=context,
                     event_callback=event_callback,
                     stt_stream=stt_stream,
@@ -582,9 +596,6 @@ def run_forever(
                 # If no error, reset counter
                 if not had_error:
                     consecutive_errors = 0
-                
-                # No need to manually update conversation_id here as it's handled by event handlers
-                # that store it in the registry
                 
                 # Log the result conversation ID for debugging purposes
                 result_conversation_id = result.get("conversation_id")

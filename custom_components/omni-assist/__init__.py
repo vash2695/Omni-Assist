@@ -53,9 +53,11 @@ async def async_setup(hass: HomeAssistant, config: ConfigType):
                     
                     if current_time - last_update_time <= 300:  # 5 minutes timeout
                         conversation_id = device_data["last_conversation_id"]
-                        _LOGGER.debug(f"Using last known conversation_id for device: {conversation_id}")
+                        _LOGGER.debug(f"Using last known conversation_id for device: {conversation_id} (age: {current_time - last_update_time}s)")
                     else:
-                        _LOGGER.debug(f"Conversation timed out (age: {current_time - last_update_time}s > 300s)")
+                        _LOGGER.debug(f"Conversation timed out (age: {current_time - last_update_time}s > 300s), starting new conversation")
+                else:
+                    _LOGGER.debug(f"No conversation_id provided and none in registry, starting new conversation")
                 
                 # Store follow-up flag in the registry for thread-safe access
                 device_data["request_followup"] = request_followup
@@ -110,7 +112,14 @@ async def async_setup(hass: HomeAssistant, config: ConfigType):
                     
                     # If this is a new conversation ID and different from what we passed in, log that too
                     if result_conversation_id != conversation_id:
-                        _LOGGER.debug(f"New conversation started (old: {conversation_id}, new: {result_conversation_id})")
+                        _LOGGER.debug(f"New conversation started (old: {conversation_id or 'None'}, new: {result_conversation_id})")
+                    
+                    # Make sure it's saved in the registry if we have a device_id
+                    if device_id and device_id in OMNI_ASSIST_REGISTRY:
+                        if OMNI_ASSIST_REGISTRY[device_id].get("last_conversation_id") != result_conversation_id:
+                            OMNI_ASSIST_REGISTRY[device_id]["last_conversation_id"] = result_conversation_id
+                            OMNI_ASSIST_REGISTRY[device_id]["conversation_timestamp"] = time.time()
+                            _LOGGER.debug(f"Updated registry with conversation_id: {result_conversation_id}")
                 
                 return result
             except asyncio.CancelledError:

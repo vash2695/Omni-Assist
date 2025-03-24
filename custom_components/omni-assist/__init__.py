@@ -2,7 +2,7 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, ServiceResponse, SupportsResponse, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceResponse, SupportsResponse, ServiceCall, Context
 from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.typing import ConfigType
 
@@ -13,17 +13,60 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = (Platform.SENSOR, Platform.SWITCH)
 
+# Global registry to track all Omni-Assist devices
+OMNI_ASSIST_REGISTRY = {}
+
 
 async def async_setup(hass: HomeAssistant, config: ConfigType):
     async def run(call: ServiceCall) -> ServiceResponse:
         stt_stream = Stream()
+        device_id = call.data.get("device_id")
+        start_stage = call.data.get("start_stage")
+        request_followup = call.data.get("request_followup", False)
+        conversation_id = call.data.get("conversation_id")
+        
+        # Get run options - either from specified device or from call data
+        run_options = call.data.copy()
+        
+        # If a device ID is specified, use that device's configuration as a base
+        # and merge any explicitly specified options
+        if device_id and device_id in OMNI_ASSIST_REGISTRY:
+            device_data = OMNI_ASSIST_REGISTRY[device_id]
+            # Start with the device's own options
+            base_options = device_data["options"].copy()
+            # Override with any explicitly provided options
+            base_options.update(run_options)
+            run_options = base_options
+            
+            # Get the device's UID for proper event routing
+            run_options["device_uid"] = device_data["uid"]
+            
+            _LOGGER.debug(f"Running pipeline for device {device_id} with UID {device_data['uid']}")
+        
+        # Store control flags in context for pipeline stages
+        context = call.context.copy() if call.context else Context()
+        
+        # Create extra_data if it doesn't exist
+        if not hasattr(context, "extra_data"):
+            context.extra_data = {}
+        
+        context.extra_data.update({
+            "start_stage": start_stage,
+            "request_followup": request_followup,
+        })
 
         try:
-            coro = stream_run(hass, call.data, stt_stream=stt_stream)
-            hass.async_create_task(coro)
+            # Only start stream if needed based on start_stage
+            if not start_stage or start_stage in ("wake_word", "stt"):
+                coro = stream_run(hass, run_options, stt_stream=stt_stream)
+                hass.async_create_task(coro)
 
             return await assist_run(
-                hass, call.data, context=call.context, stt_stream=stt_stream
+                hass, 
+                run_options, 
+                context=context, 
+                stt_stream=stt_stream,
+                conversation_id=conversation_id
             )
         except Exception as e:
             _LOGGER.error("omni_assist.run", exc_info=e)

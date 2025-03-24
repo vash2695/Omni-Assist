@@ -1,14 +1,15 @@
 import logging
 from typing import Callable
 
-from homeassistant.components.assist_pipeline import PipelineEvent, PipelineEventType
+from homeassistant.components.assist_pipeline import PipelineEvent, PipelineEventType, PipelineStage
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .core import run_forever, init_entity, EVENTS
+from .core import run_forever, init_entity, EVENTS, DOMAIN
+from . import OMNI_ASSIST_REGISTRY
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,6 +36,14 @@ class OmniAssistSwitch(SwitchEntity):
     def event_callback(self, event: PipelineEvent):
         _LOGGER.debug(f"Received pipeline event: {event.type}")
         
+        # Check if this event is for a specific device
+        if event.data and "device_uid" in event.data:
+            target_uid = event.data.get("device_uid")
+            if target_uid != self.uid:
+                # Event is not for this device, ignore it
+                _LOGGER.debug(f"Ignoring event for different device UID: {target_uid}")
+                return
+            
         # Map pipeline event types to our sensor entity types
         event_type_mapping = {
             "wake_word-start": "wake-start",
@@ -53,6 +62,45 @@ class OmniAssistSwitch(SwitchEntity):
         if event.type == "reset-after-tts":
             _LOGGER.debug("TTS playback complete, resetting all entity states")
             
+            # Check if we need to start a follow-up conversation
+            start_followup = False
+            if event.data and "request_followup" in event.data:
+                start_followup = event.data.get("request_followup", False)
+                _LOGGER.debug(f"Follow-up request flag from event: {start_followup}")
+
+            # Handle follow-up if requested
+            if start_followup:
+                _LOGGER.debug("Starting follow-up conversation (skipping wake word)")
+                
+                # Set wake to "end" and STT to "start" to indicate we're bypassing wake detection
+                self.hass.loop.call_soon_threadsafe(
+                    async_dispatcher_send, self.hass, f"{self.uid}-wake", "end"
+                )
+                self.hass.loop.call_soon_threadsafe(
+                    async_dispatcher_send, self.hass, f"{self.uid}-stt", "start"
+                )
+                
+                # Get conversation_id from event data if available
+                conversation_id = None
+                if event.data and "conversation_id" in event.data:
+                    conversation_id = event.data.get("conversation_id")
+                
+                # Prepare service call to start new pipeline
+                service_data = {
+                    "device_id": self.device_entry.id,
+                    "start_stage": "stt",  # Skip wake word detection
+                    "conversation_id": conversation_id
+                }
+                
+                # Call the omni_assist.run service to start a new pipeline
+                self.hass.async_create_task(
+                    self.hass.services.async_call(
+                        DOMAIN, "run", service_data, context=self._context
+                    )
+                )
+                return
+            
+            # If no follow-up, reset to normal state
             # Reset wake to "start" state after TTS playback completes
             self.hass.loop.call_soon_threadsafe(
                 async_dispatcher_send, self.hass, f"{self.uid}-wake", "start"
@@ -211,6 +259,14 @@ class OmniAssistSwitch(SwitchEntity):
         _LOGGER.debug("OmniAssistSwitch added to HASS")
         self.options["assist"] = {"device_id": self.device_entry.id}
         _LOGGER.debug(f"Set device_id in options: {self.device_entry.id}")
+        
+        # Register this switch in the global registry
+        OMNI_ASSIST_REGISTRY[self.device_entry.id] = {
+            "switch": self,
+            "uid": self.uid,
+            "options": self.options.copy()
+        }
+        _LOGGER.debug(f"Registered device in OMNI_ASSIST_REGISTRY with ID: {self.device_entry.id}")
 
     async def async_turn_on(self) -> None:
         _LOGGER.debug("Attempting to turn on OmniAssistSwitch")
@@ -241,6 +297,11 @@ class OmniAssistSwitch(SwitchEntity):
                 event_callback=self.event_callback,
             )
             _LOGGER.debug("run_forever completed successfully")
+            
+            # Update registry with latest options
+            if self.device_entry.id in OMNI_ASSIST_REGISTRY:
+                OMNI_ASSIST_REGISTRY[self.device_entry.id]["options"] = self.options.copy()
+                
         except Exception as e:
             _LOGGER.error(f"Error turning on OmniAssist: {e}")
             self._attr_is_on = False
@@ -274,6 +335,12 @@ class OmniAssistSwitch(SwitchEntity):
 
     async def async_will_remove_from_hass(self) -> None:
         _LOGGER.debug("OmniAssistSwitch is being removed from HASS")
+        
+        # Remove from registry
+        if self.device_entry.id in OMNI_ASSIST_REGISTRY:
+            del OMNI_ASSIST_REGISTRY[self.device_entry.id]
+            _LOGGER.debug(f"Removed device from registry: {self.device_entry.id}")
+            
         if self._attr_is_on and self.on_close is not None:
             try:
                 _LOGGER.debug("Calling on_close function during removal")

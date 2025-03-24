@@ -2,7 +2,7 @@
 # https://www.home-assistant.io/docs/blueprint/selectors/
 run:
   name: Run
-  description:
+  description: Run an Omni-Assist voice pipeline
   fields:
     stream_source:
       name: Stream URL
@@ -58,6 +58,38 @@ run:
       description: Settings > Voice Assistant
       selector:
         assist_pipeline:
+
+    device_id:
+      name: Device ID
+      description: The specific Omni-Assist device to run this pipeline on
+      example: "omni_assist_device_123"
+      selector:
+        device:
+          integration: omni_assist
+
+    start_stage:
+      name: Start Stage
+      description: The pipeline stage to start from (default follows device configuration)
+      example: "intent"
+      selector:
+        select:
+          options:
+            - "wake_word"
+            - "stt"
+            - "intent"
+
+    request_followup:
+      name: Request Follow-up
+      description: Automatically start a new pipeline at STT stage after TTS completes
+      default: false
+      selector:
+        boolean:
+
+    conversation_id:
+      name: Conversation ID
+      description: Specific conversation ID to continue (for advanced use)
+      selector:
+        text:
 
     assist:
       name: Assist

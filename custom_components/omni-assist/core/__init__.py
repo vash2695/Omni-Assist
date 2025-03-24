@@ -163,6 +163,20 @@ async def assist_run(
         # get default pipeline
         pipeline = assist_pipeline.async_get_pipeline(hass)
 
+    # Get start_stage from context if provided
+    if context and hasattr(context, "extra_data") and context.extra_data.get("start_stage"):
+        start_stage_str = context.extra_data.get("start_stage")
+        _LOGGER.debug(f"Using start_stage from context: {start_stage_str}")
+        
+        # Map string stage name to PipelineStage enum
+        if start_stage_str == "intent":
+            assist["start_stage"] = PipelineStage.INTENT
+        elif start_stage_str == "stt":
+            assist["start_stage"] = PipelineStage.STT
+        elif start_stage_str == "wake_word":
+            assist["start_stage"] = PipelineStage.WAKE_WORD
+    
+    # Default start_stage handling if not overridden
     if "start_stage" not in assist:
         # auto select start stage
         if pipeline.wake_word_entity:
@@ -180,6 +194,7 @@ async def assist_run(
             assist["end_stage"] = PipelineStage.INTENT
 
     player_entity_id = data.get("player_entity_id")
+    device_uid = data.get("device_uid")  # Get device_uid if provided
 
     # 2. Setup Pipeline Run
     events = {}
@@ -189,6 +204,13 @@ async def assist_run(
     def internal_event_callback(event: PipelineEvent):
         nonlocal pipeline_run
         _LOGGER.debug(f"Event: {event.type}, Data: {event.data}")
+
+        # Add device_uid to event data if provided
+        if device_uid and (event.data is None or "device_uid" not in event.data):
+            if event.data is None:
+                event.data = {"device_uid": device_uid}
+            else:
+                event.data["device_uid"] = device_uid
 
         events[event.type] = (
             {"data": event.data, "timestamp": event.timestamp}
@@ -256,7 +278,8 @@ async def assist_run(
                         {
                             "message": "TTS playback in progress",
                             "timestamp": time.time(),
-                            "tts_output": tts
+                            "tts_output": tts,
+                            "device_uid": device_uid
                         }
                     )
                     event_callback(running_event)
@@ -270,6 +293,11 @@ async def assist_run(
                     await asyncio.sleep(duration)
                     await asyncio.sleep(1)  # Additional small delay
                 
+                    # Check if we should request a follow-up
+                    request_followup = False
+                    if context and hasattr(context, "extra_data"):
+                        request_followup = context.extra_data.get("request_followup", False)
+                
                     # After TTS playback completes, reset entity states
                     if event_callback:
                         _LOGGER.debug(f"TTS playback of {duration} seconds completed, resetting entity states")
@@ -278,7 +306,10 @@ async def assist_run(
                             "reset-after-tts",
                             {
                                 "message": "TTS playback complete, resetting states",
-                                "timestamp": time.time()
+                                "timestamp": time.time(),
+                                "request_followup": request_followup,
+                                "conversation_id": events.get(PipelineEventType.INTENT_END, {}).get("data", {}).get("intent_output", {}).get("conversation_id"),
+                                "device_uid": device_uid
                             }
                         )
                         event_callback(reset_event)

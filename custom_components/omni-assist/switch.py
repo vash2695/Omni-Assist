@@ -7,7 +7,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers import event
+from homeassistant.helpers.event import async_call_later
 
 from .core import run_forever, init_entity, EVENTS, DOMAIN
 from . import OMNI_ASSIST_REGISTRY
@@ -107,7 +107,7 @@ class OmniAssistSwitch(SwitchEntity):
                 try:
                     _LOGGER.debug(f"Calling omni_assist.run service for follow-up with data: {service_data}")
                     # Use call_later to make sure reset event is fully processed before starting new pipeline
-                    event.async_call_later(
+                    async_call_later(
                         self.hass,
                         0.5,  # Half-second delay
                         lambda _: self.hass.services.async_call(

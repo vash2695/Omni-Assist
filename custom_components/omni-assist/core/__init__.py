@@ -429,7 +429,13 @@ async def assist_run(
                     "stt-start",
                     stt_start_data
                 )
+                # Make sure to process this event properly
+                _LOGGER.debug(f"Dispatching synthetic stt-start event for service call")
                 event_callback(stt_start_event)
+                
+                # Add brief delay to ensure events are processed in order
+                await asyncio.sleep(0.05)
+                
             elif assist["start_stage"] == PipelineStage.INTENT:
                 # Create synthetic intent-start event for proper entity tracking
                 intent_start_data = {
@@ -447,7 +453,12 @@ async def assist_run(
                     "intent-start",
                     intent_start_data
                 )
+                # Make sure to process this event properly
+                _LOGGER.debug(f"Dispatching synthetic intent-start event for service call")
                 event_callback(intent_start_event)
+                
+                # Add brief delay to ensure events are processed in order
+                await asyncio.sleep(0.05)
 
         # 5. Run Stream (optional)
         if stt_stream:
@@ -511,6 +522,8 @@ def run_forever(
         conversation_id = None
         last_interaction_time = None
         waiting_for_next_interaction = True  # Flag to track if waiting for next interaction
+        consecutive_errors = 0  # Track consecutive errors
+        last_error_time = None  # Track when the last error occurred
         
         while not stt_stream.closed:
             try:
@@ -519,6 +532,19 @@ def run_forever(
                 # Reset conversation context if too much time has passed
                 if last_interaction_time and current_time - last_interaction_time > 300:
                     conversation_id = None
+                
+                # Implement progressive backoff for errors
+                if consecutive_errors > 0:
+                    # Calculate wait time based on number of consecutive errors (capped at 30 seconds)
+                    wait_seconds = min(2 ** consecutive_errors, 30)
+                    
+                    # Only proceed if enough time has passed since last error
+                    if last_error_time and current_time - last_error_time < wait_seconds:
+                        # Not enough time has passed, wait a bit and continue the loop
+                        await asyncio.sleep(0.5)
+                        continue
+                    
+                    _LOGGER.debug(f"Retrying after {consecutive_errors} consecutive errors, waited {wait_seconds}s")
                 
                 # Run the assist pipeline
                 result = await assist_run(
@@ -529,6 +555,21 @@ def run_forever(
                     stt_stream=stt_stream,
                     conversation_id=conversation_id
                 )
+                
+                # Check if an error occurred
+                had_error = False
+                for event_type in result["events"]:
+                    if event_type == PipelineEventType.ERROR:
+                        had_error = True
+                        consecutive_errors += 1
+                        last_error_time = current_time
+                        error_code = result["events"][event_type].get("data", {}).get("code", "unknown")
+                        _LOGGER.debug(f"Pipeline error detected: {error_code}, consecutive errors: {consecutive_errors}")
+                        break
+                
+                # If no error, reset counter
+                if not had_error:
+                    consecutive_errors = 0
                 
                 # Update conversation tracking
                 new_conversation_id = result.get("conversation_id")
@@ -545,7 +586,9 @@ def run_forever(
                 
             except Exception as e:
                 _LOGGER.exception(f"run_assist error: {e}")
-                await asyncio.sleep(1)  # Longer delay after error
+                consecutive_errors += 1
+                last_error_time = time.time()
+                await asyncio.sleep(min(2 ** consecutive_errors, 30))  # Exponential backoff
 
     # Create coroutines
     run_stream_coro = run_stream()

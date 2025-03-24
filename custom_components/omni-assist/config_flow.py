@@ -9,6 +9,10 @@ from homeassistant.helpers import entity_registry
 
 from .core import DOMAIN
 
+async def get_pipelines(hass):
+    """Get available pipelines from Home Assistant."""
+    pipelines = await hass.components.assist_pipeline.async_get_pipelines(hass)
+    return [{"id": p.id, "name": p.name} for p in pipelines]
 
 class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
     async def async_step_user(self, user_input=None):

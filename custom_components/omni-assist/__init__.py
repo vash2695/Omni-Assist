@@ -9,12 +9,17 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceResponse, SupportsResponse, ServiceCall
 from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.typing import ConfigType
+from homeassistant.components.assist_pipeline import (
+    Pipeline, 
+    PipelineRun,
+    PipelineStage,
+    PipelineRunOptions,
+    async_pipeline_from_audio_stream
+)
 
 from .core import DOMAIN, get_stream_source, assist_run, stream_run
 from .core.stream import Stream
 from .core.wyoming_server import setup_wyoming_server
-from .core.pipeline import Pipeline, PipelineRunOptions, PipelineStage
-from .core.event_callback import async_pipeline_from_audio_stream
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,6 +55,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType):
 
 
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
+    """Set up Omni-Assist from a config entry."""
     if config_entry.data:
         hass.config_entries.async_update_entry(
             config_entry, data={}, options=config_entry.data
@@ -58,16 +64,15 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     if not config_entry.update_listeners:
         config_entry.add_update_listener(async_update_options)
 
+    # Initialize the component data structure
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN].setdefault(config_entry.entry_id, {})
+    hass.data[DOMAIN].setdefault("virtual_satellites", {})
+
     # Store the config entry in the registry if it's a satellite
     if config_entry.options.get("satellite_mode", False):
         entry_id = config_entry.entry_id
         _LOGGER.debug(f"Setting up virtual satellite for entry {entry_id}")
-
-        # Store the satellite configuration in the registry
-        if DOMAIN not in hass.data:
-            hass.data[DOMAIN] = {}
-        if "virtual_satellites" not in hass.data[DOMAIN]:
-            hass.data[DOMAIN]["virtual_satellites"] = {}
             
         # Create pipeline configuration
         pipeline_config = create_pipeline_config(config_entry.options)
@@ -118,13 +123,21 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
                 # Process audio at the "stt" stage of the pipeline
                 try:
                     pipeline_id = config_entry.options.get("pipeline_id")
-                    pipeline = Pipeline.get_instance(hass, pipeline_id) if pipeline_id else None
                     
-                    if pipeline:
+                    if pipeline_id:
                         _LOGGER.debug(f"Processing Wyoming audio with pipeline {pipeline_id}")
                         
                         # Create a new run context
                         run_id = str(uuid.uuid4())
+                        
+                        # Get the pipeline
+                        pipeline = await hass.components.assist_pipeline.async_get_pipeline(hass, pipeline_id)
+                        
+                        if not pipeline:
+                            _LOGGER.warning(f"Pipeline {pipeline_id} not found")
+                            return
+                            
+                        # Set up the pipeline options
                         options = PipelineRunOptions(
                             pipeline=pipeline,
                             start_stage=PipelineStage.STT,
@@ -141,17 +154,17 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
                             media=media,
                             options=options,
                             run_id=run_id,
-                            context=event_callback.context,
-                            device_id=device_id,
-                            event_callback=event_callback,
+                            context=None,  # No context needed
+                            device_id=None,  # Will use the default device
+                            event_callback=None,  # We'll handle events through the pipeline run
                         )
                     else:
-                        _LOGGER.warning("No pipeline available for Wyoming audio processing")
+                        _LOGGER.warning("No pipeline ID set for Wyoming audio processing")
                 except Exception as e:
                     _LOGGER.error(f"Error processing Wyoming audio: {e}")
             except Exception as e:
                 _LOGGER.error(f"Error handling Wyoming audio data: {e}")
-        
+                
         # Initialize the Wyoming server
         wyoming_server = await setup_wyoming_server(
             hass, 
@@ -166,7 +179,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
             _LOGGER.info(f"Wyoming server started successfully for entry {config_entry.entry_id}")
             
             # Store the server in data for later cleanup
-            hass.data[DOMAIN][config_entry.entry_id]["wyoming_server"] = wyoming_server
+            hass.data.setdefault(DOMAIN, {}).setdefault(config_entry.entry_id, {})["wyoming_server"] = wyoming_server
         else:
             _LOGGER.error(f"Failed to start Wyoming server for entry {config_entry.entry_id}")
 
@@ -174,6 +187,9 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
 
 
 async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry):
+    """Unload a config entry."""
+    _LOGGER.debug(f"Unloading Omni-Assist: {config_entry.entry_id}")
+    
     # Clean up the satellite server if it exists
     if config_entry.options.get("satellite_mode", False):
         entry_id = config_entry.entry_id
@@ -190,7 +206,11 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry):
             del hass.data[DOMAIN]["virtual_satellites"][entry_id]
 
     # Stop Wyoming server if running
-    if "wyoming_server" in hass.data[DOMAIN].get(config_entry.entry_id, {}):
+    if (
+        DOMAIN in hass.data 
+        and config_entry.entry_id in hass.data[DOMAIN]
+        and "wyoming_server" in hass.data[DOMAIN][config_entry.entry_id]
+    ):
         _LOGGER.debug(f"Stopping Wyoming server for entry {config_entry.entry_id}")
         wyoming_server = hass.data[DOMAIN][config_entry.entry_id]["wyoming_server"]
         await wyoming_server.stop()
@@ -200,7 +220,8 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     
     if unload_ok:
         _LOGGER.debug(f"Successfully unloaded Omni-Assist: {config_entry.entry_id}")
-        hass.data[DOMAIN].pop(config_entry.entry_id)
+        if DOMAIN in hass.data and config_entry.entry_id in hass.data[DOMAIN]:
+            hass.data[DOMAIN].pop(config_entry.entry_id)
     
     return unload_ok
 

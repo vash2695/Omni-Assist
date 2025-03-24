@@ -8,11 +8,10 @@
   "config_flow": true,
   "dependencies": [
     "stream",
-    "assist_pipeline",
-    "wyoming"
+    "assist_pipeline"
   ],
   "documentation": "https://github.com/vash2695/Omni-Assist",
   "iot_class": "calculated",
   "requirements": [],
-  "version": "v0.1.0"
+  "version": "v0.2.0"
 }

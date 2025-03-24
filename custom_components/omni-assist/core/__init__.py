@@ -3,7 +3,7 @@ import io
 import logging
 import time
 import re
-from typing import Callable, Dict, Any, Optional
+from typing import Callable
 from mutagen.mp3 import MP3
 
 from homeassistant.components import assist_pipeline
@@ -55,37 +55,13 @@ def new(cls, kwargs: dict):
 
 def init_entity(entity: Entity, key: str, config_entry: ConfigEntry) -> str:
     unique_id = config_entry.entry_id[:7]
-    
-    if entity is None:
-        return unique_id
-        
     num = 1 + EVENTS.index(key) if key in EVENTS else 0
 
     entity._attr_unique_id = f"{unique_id}-{key}"
-    
-    # Modify the name based on satellite mode
-    if config_entry.options.get("satellite_mode", False) and key:
-        satellite_room = config_entry.options.get("satellite_room", "")
-        if satellite_room:
-            entity._attr_name = f"{satellite_room} {key.upper().replace('_', ' ')}"
-        else:
-            entity._attr_name = f"{config_entry.title} Satellite {key.upper().replace('_', ' ')}"
-    else:
-        entity._attr_name = config_entry.title + " " + key.upper().replace("_", " ")
-        
+    entity._attr_name = config_entry.title + " " + key.upper().replace("_", " ")
     entity._attr_icon = f"mdi:numeric-{num}"
-    
-    # Modify device info based on satellite mode
-    device_name = config_entry.title
-    if config_entry.options.get("satellite_mode", False):
-        satellite_room = config_entry.options.get("satellite_room", "")
-        if satellite_room:
-            device_name = f"{satellite_room} Satellite"
-        else:
-            device_name = f"{config_entry.title} Satellite"
-    
     entity._attr_device_info = DeviceInfo(
-        name=device_name,
+        name=config_entry.title,
         identifiers={(DOMAIN, unique_id)},
         entry_type=DeviceEntryType.SERVICE,
     )
@@ -144,30 +120,6 @@ async def get_tts_duration(hass: HomeAssistant, tts_url: str) -> float:
         return 0
 
 
-async def get_tts_audio(hass: HomeAssistant, tts_url: str) -> Optional[bytes]:
-    """Get the TTS audio data."""
-    try:
-        # Ensure we have the full URL
-        if tts_url.startswith('/'):
-            base_url = get_url(hass)
-            full_url = f"{base_url}{tts_url}"
-        else:
-            full_url = tts_url
-
-        # Use Home Assistant's aiohttp client session
-        session = async_get_clientsession(hass)
-        async with session.get(full_url) as response:
-            if response.status != 200:
-                _LOGGER.error(f"Failed to fetch TTS audio: HTTP {response.status}")
-                return None
-            
-            return await response.read()
-
-    except Exception as e:
-        _LOGGER.error(f"Error getting TTS audio: {e}")
-        return None
-
-
 async def stream_run(hass: HomeAssistant, data: dict, stt_stream: Stream) -> None:
     stream_kwargs = data.get("stream", {})
 
@@ -190,8 +142,7 @@ async def assist_run(
     context: Context = None,
     event_callback: PipelineEventCallback = None,
     stt_stream: Stream = None,
-    conversation_id: str | None = None,
-    tts_audio_callback: Callable[[bytes], Any] = None,
+    conversation_id: str | None = None
 ) -> dict:
     _LOGGER.debug(f"assist_run called with conversation_id: {conversation_id}")
     
@@ -292,7 +243,7 @@ async def assist_run(
             # Just log this event - it's already passed to event_callback
             _LOGGER.debug("TTS processing started")
         elif event.type == PipelineEventType.TTS_END:
-            if player_entity_id or tts_audio_callback:
+            if player_entity_id:
                 tts = event.data["tts_output"]
                 tts_url = tts["url"]
 
@@ -314,14 +265,6 @@ async def assist_run(
                     duration = await get_tts_duration(hass, tts_url)
                     events[PipelineEventType.TTS_END]["data"]["tts_duration"] = duration
                     _LOGGER.debug(f"Stored TTS duration: {duration} seconds")
-                    
-                    # If we have a Wyoming tts_audio_callback, send audio to Wyoming clients
-                    if tts_audio_callback:
-                        _LOGGER.debug("Getting TTS audio for Wyoming clients")
-                        audio_data = await get_tts_audio(hass, tts_url)
-                        if audio_data:
-                            _LOGGER.debug(f"Sending {len(audio_data)} bytes of TTS audio to Wyoming clients")
-                            await tts_audio_callback(audio_data)
                 
                     # Set a timer to simulate wake word detection after TTS playback
                     await asyncio.sleep(duration)
@@ -349,10 +292,7 @@ async def assist_run(
 
                 # Schedule an async task to simulate wake word and continue pipeline
                 hass.create_task(simulate_wake_word_and_continue())
-                
-                # If we have a player, play the audio
-                if player_entity_id:
-                    play_media(hass, player_entity_id, tts["url"], tts["mime_type"])
+                play_media(hass, player_entity_id, tts["url"], tts["mime_type"])
 
     pipeline_run = PipelineRun(
         hass,
@@ -422,7 +362,6 @@ def run_forever(
     data: dict,
     context: Context,
     event_callback: PipelineEventCallback,
-    tts_audio_callback: Callable[[bytes], Any] = None,
 ) -> Callable:
     _LOGGER.debug("Entering run_forever function")
     stt_stream = Stream()
@@ -455,8 +394,7 @@ def run_forever(
                     context=context,
                     event_callback=event_callback,
                     stt_stream=stt_stream,
-                    conversation_id=conversation_id,
-                    tts_audio_callback=tts_audio_callback,
+                    conversation_id=conversation_id
                 )
                 
                 # Update conversation tracking

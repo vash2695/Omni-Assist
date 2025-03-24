@@ -146,25 +146,12 @@ async def assist_run(
 ) -> dict:
     _LOGGER.debug(f"assist_run called with conversation_id: {conversation_id}")
     
-    # Extract system message from context if available
-    system_message = None
-    if context and hasattr(context, "extra_data") and context.extra_data:
-        system_message = context.extra_data.get("system_message")
-        if system_message:
-            _LOGGER.debug(f"Using system message from context: {system_message[:50]}...")
-    
     # 1. Process assist_pipeline settings
     assist = data.get("assist", {})
 
     # Apply Google STT optimized settings
     assist = configure_google_stt_pipeline(assist)
     _LOGGER.debug("Applied optimized Google STT settings to prevent early VAD timeout")
-
-    # If we have a system message, apply it to the pipeline context
-    if system_message:
-        if "conversation" not in assist:
-            assist["conversation"] = {}
-        assist["conversation"]["system_prompt"] = system_message
 
     if pipeline_id := data.get("pipeline_id"):
         # get pipeline from pipeline ID

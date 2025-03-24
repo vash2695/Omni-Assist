@@ -2,7 +2,7 @@
 # https://www.home-assistant.io/docs/blueprint/selectors/
 run:
   name: Run
-  description: Run the Omni-Assist voice pipeline
+  description:
   fields:
     stream_source:
       name: Stream URL
@@ -58,21 +58,6 @@ run:
       description: Settings > Voice Assistant
       selector:
         assist_pipeline:
-
-    conversation_id:
-      name: Conversation ID
-      description: ID to continue an existing conversation (used for follow-up interactions)
-      example: "conversation_12345"
-      selector:
-        text:
-
-    extra_system_message:
-      name: System Message
-      description: Custom system message to provide additional context or instructions to the assistant
-      example: "Respond as if you're a pirate. The user is asking about the weather."
-      selector:
-        text:
-          multiline: true
 
     assist:
       name: Assist

@@ -4,6 +4,7 @@ import json
 import logging
 import socket
 from typing import Any, Dict, Optional
+import concurrent.futures
 
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
@@ -213,9 +214,28 @@ class OmniAssistWyomingSatellite:
                 }
             )
             
-            self.zeroconf = Zeroconf()
-            self.zeroconf.register_service(info)
-            _LOGGER.info(f"Wyoming satellite registered via Zeroconf: omni_assist_{self.device_id}")
+            # Run Zeroconf registration in a separate thread to avoid blocking the event loop
+            def register_zeroconf():
+                try:
+                    _LOGGER.debug("Starting Zeroconf registration in thread")
+                    zc = Zeroconf()
+                    zc.register_service(info)
+                    _LOGGER.info(f"Wyoming satellite registered via Zeroconf: omni_assist_{self.device_id}")
+                    return zc
+                except Exception as e:
+                    _LOGGER.error(f"Failed to register Zeroconf in thread: {e}")
+                    return None
+
+            # Use a thread pool executor to run the registration
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(register_zeroconf)
+                try:
+                    self.zeroconf = future.result(timeout=5)  # 5 second timeout
+                except concurrent.futures.TimeoutError:
+                    _LOGGER.warning("Zeroconf registration timed out, continuing without Zeroconf")
+                except Exception as e:
+                    _LOGGER.error(f"Error in Zeroconf thread: {e}")
+                
         except ImportError as err:
             _LOGGER.error(f"Zeroconf package not available: {err}")
             # Try to continue without Zeroconf - satellite will need to be manually configured
@@ -245,12 +265,25 @@ class OmniAssistWyomingSatellite:
             if pending:
                 _LOGGER.warning(f"{len(pending)} Wyoming client connections did not close gracefully")
         
-        # Unregister from Zeroconf
+        # Unregister from Zeroconf in a thread to avoid blocking
         if self.zeroconf:
             _LOGGER.debug("Unregistering Wyoming satellite from Zeroconf")
             try:
-                self.zeroconf.unregister_all_services()
-                self.zeroconf.close()
+                # Run Zeroconf unregistration in a separate thread
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    def close_zeroconf():
+                        try:
+                            self.zeroconf.unregister_all_services()
+                            self.zeroconf.close()
+                        except Exception as e:
+                            _LOGGER.debug(f"Error during Zeroconf cleanup: {e}")
+                    
+                    # Run with a timeout to prevent blocking
+                    future = executor.submit(close_zeroconf)
+                    try:
+                        future.result(timeout=3)  # 3 second timeout
+                    except concurrent.futures.TimeoutError:
+                        _LOGGER.warning("Zeroconf unregistration timed out")
             except Exception as e:
-                _LOGGER.error(f"Error closing Zeroconf: {e}")
+                _LOGGER.error(f"Error during Zeroconf cleanup: {e}", exc_info=False)
             self.zeroconf = None 

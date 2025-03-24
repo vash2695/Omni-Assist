@@ -8,10 +8,19 @@
   "config_flow": true,
   "dependencies": [
     "stream",
-    "assist_pipeline"
+    "assist_pipeline",
+    "zeroconf"
   ],
   "documentation": "https://github.com/vash2695/Omni-Assist",
   "iot_class": "calculated",
-  "requirements": [],
-  "version": "v0.0.1"
+  "requirements": [
+    "zeroconf>=0.39.0",
+    "mutagen>=1.46.0"
+  ],
+  "version": "v0.1.0",
+  "multiple_instances": true,
+  "homekit": {},
+  "mqtt": {},
+  "zeroconf": ["_wyoming._tcp.local."],
+  "ssdp": []
 }

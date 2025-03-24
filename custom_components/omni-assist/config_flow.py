@@ -46,6 +46,8 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                     vol.Optional("stt_end_media"): str,
                     vol.Optional("stt_error_media"): str,
                     vol.Optional("pipeline_id"): vol.In(pipelines),
+                    vol.Optional("satellite_mode", default=False): bool,
+                    vol.Optional("satellite_room"): str,
                 },
                 user_input,
             ),
@@ -84,21 +86,38 @@ class OptionsFlowHandler(OptionsFlow):
         }
 
         defaults = self.config_entry.options.copy()
+        
+        # Add satellite mode configuration to options
+        schema = {
+            vol.Exclusive("stream_source", "url"): str,
+            vol.Exclusive("camera_entity_id", "url"): vol.In(cameras),
+            vol.Optional("player_entity_id"): cv.multi_select(players),
+            vol.Optional("stt_start_media"): str,
+            vol.Optional("stt_end_media"): str,
+            vol.Optional("stt_error_media"): str,
+            vol.Optional("pipeline_id"): vol.In(pipelines),
+            vol.Optional("satellite_mode", default=defaults.get("satellite_mode", False)): bool,
+        }
+        
+        # Add additional satellite-specific configuration if satellite mode is enabled
+        if defaults.get("satellite_mode", False):
+            schema.update({
+                vol.Optional("satellite_room", default=defaults.get("satellite_room", "")): str,
+                vol.Optional("satellite_port", default=defaults.get("satellite_port", 10600)): int,
+                vol.Optional("noise_suppression_level", default=defaults.get("noise_suppression_level", 0)): vol.All(
+                    vol.Coerce(int), vol.Range(min=0, max=4)
+                ),
+                vol.Optional("auto_gain_dbfs", default=defaults.get("auto_gain_dbfs", 0)): vol.All(
+                    vol.Coerce(int), vol.Range(min=-31, max=0)
+                ),
+                vol.Optional("volume_multiplier", default=defaults.get("volume_multiplier", 1.0)): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.1, max=5.0)
+                ),
+            })
 
         return self.async_show_form(
             step_id="init",
-            data_schema=vol_schema(
-                {
-                    vol.Exclusive("stream_source", "url"): str,
-                    vol.Exclusive("camera_entity_id", "url"): vol.In(cameras),
-                    vol.Optional("player_entity_id"): cv.multi_select(players),
-                    vol.Optional("stt_start_media"): str,
-                    vol.Optional("stt_end_media"): str,
-                    vol.Optional("stt_error_media"): str,
-                    vol.Optional("pipeline_id"): vol.In(pipelines),
-                },
-                defaults,
-            ),
+            data_schema=vol_schema(schema, defaults),
         )
 
 

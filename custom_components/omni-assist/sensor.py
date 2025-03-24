@@ -1,3 +1,6 @@
+import logging
+from typing import Any
+
 from homeassistant.components import assist_pipeline
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
@@ -8,59 +11,61 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .core import EVENTS, init_entity
 
+_LOGGER = logging.getLogger(__name__)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    pipeline_id = config_entry.options.get("pipeline_id")
-    pipeline = assist_pipeline.async_get_pipeline(hass, pipeline_id)
-
+    unique_id = init_entity(None, None, config_entry)
+    
+    # Create status sensors, with appropriate naming based on whether this is a satellite
+    is_satellite = config_entry.options.get("satellite_mode", False)
+    
     entities = []
-
-    for event in EVENTS:
-        if event == "wake" and not pipeline.wake_word_entity:
-            continue
-        if event == "stt" and not pipeline.stt_engine:
-            break
-        if event == "tts" and not pipeline.tts_engine:
-            continue
-        entities.append(OmniAssistSensor(config_entry, event))
+    for key in EVENTS:
+        entities.append(StatusSensor(unique_id, key, config_entry, is_satellite))
 
     async_add_entities(entities)
 
 
-class OmniAssistSensor(SensorEntity):
-    _attr_native_value = STATE_IDLE
-    _attr_has_entity_name = True
-    
-    # Define the order mapping for sensors - this controls display order
-    SENSOR_ORDER = {
-        "wake": 1,
-        "stt": 2,
-        "intent": 3,
-        "tts": 4
-    }
-
-    def __init__(self, config_entry: ConfigEntry, key: str):
-        # First call the standard init function
-        init_entity(self, key, config_entry)
+class StatusSensor(SensorEntity):
+    def __init__(self, uid: str, key: str, config_entry: ConfigEntry, is_satellite: bool = False):
+        self._attr_native_value = None
+        self._attr_extra_state_attributes = {}
+        self.uid = init_entity(self, key, config_entry)
+        self.topic = f"{uid}-{key}"
+        self.entry_id = config_entry.entry_id
         
-        # Set the sorting order to match the processing sequence
-        order_num = self.SENSOR_ORDER.get(key, 9)
-        
-        # Simply prepend a number to the name to control sort order
-        self._attr_name = f"{order_num} {key.upper()}"
-        
-        # Override the icon to match our custom ordering
-        self._attr_icon = f"mdi:numeric-{order_num}"
+        # Add satellite-specific attributes if in satellite mode
+        if is_satellite:
+            satellite_room = config_entry.options.get("satellite_room", "")
+            if satellite_room and key == "wake":
+                self._attr_name = f"{satellite_room} Wake Word"
+            elif satellite_room and key == "stt":
+                self._attr_name = f"{satellite_room} Speech"
+            elif satellite_room and key == "intent":
+                self._attr_name = f"{satellite_room} Intent"
+            elif satellite_room and key == "tts":
+                self._attr_name = f"{satellite_room} Response"
+                
+            # Add satellite room as an attribute for filtering in UI
+            self._attr_extra_state_attributes["satellite_room"] = satellite_room
+            self._attr_extra_state_attributes["is_satellite"] = True
 
     async def async_added_to_hass(self) -> None:
-        remove = async_dispatcher_connect(self.hass, self.unique_id, self.signal)
-        self.async_on_remove(remove)
+        self.async_on_remove(
+            async_dispatcher_connect(self.hass, self.topic, self.update_state)
+        )
 
-    def signal(self, value: str, extra: dict = None):
-        self._attr_native_value = value or STATE_IDLE
-        self._attr_extra_state_attributes = extra
-        self.schedule_update_ha_state()
+    def update_state(self, state: str, data: dict[str, Any] = None) -> None:
+        self._attr_native_value = state
+
+        if data:
+            self._attr_extra_state_attributes = data
+        elif state is None:
+            self._attr_extra_state_attributes = {}
+
+        self.async_write_ha_state()

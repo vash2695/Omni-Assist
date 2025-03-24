@@ -65,9 +65,23 @@ class OmniAssistSwitch(SwitchEntity):
             
             # Check if we need to start a follow-up conversation
             start_followup = False
+            
+            # First try to get it from event data
             if event.data and "request_followup" in event.data:
                 start_followup = event.data.get("request_followup", False)
-                _LOGGER.debug(f"Follow-up request flag from event: {start_followup}")
+            
+            # If not found or false, check the device registry as a fallback
+            if not start_followup and self.device_entry.id in OMNI_ASSIST_REGISTRY:
+                if "request_followup" in OMNI_ASSIST_REGISTRY[self.device_entry.id]:
+                    start_followup = OMNI_ASSIST_REGISTRY[self.device_entry.id]["request_followup"]
+                    _LOGGER.debug(f"Retrieved request_followup={start_followup} from device registry")
+            
+            _LOGGER.debug(f"Follow-up request flag from combined sources: {start_followup}")
+            
+            # Clear the flag in registry after using it (to prevent it from persisting accidentally)
+            if self.device_entry.id in OMNI_ASSIST_REGISTRY and "request_followup" in OMNI_ASSIST_REGISTRY[self.device_entry.id]:
+                OMNI_ASSIST_REGISTRY[self.device_entry.id]["request_followup"] = False
+                _LOGGER.debug("Reset request_followup flag in registry to prevent unintended persistence")
 
             # Handle follow-up if requested
             if start_followup:
@@ -96,6 +110,7 @@ class OmniAssistSwitch(SwitchEntity):
                 service_data = {
                     "device_id": self.device_entry.id,
                     "start_stage": "stt",  # Skip wake word detection
+                    "request_followup": False  # Don't chain multiple follow-ups automatically
                 }
                 
                 # Only add conversation_id if it exists
@@ -197,6 +212,14 @@ class OmniAssistSwitch(SwitchEntity):
         # Special handling for TTS start - explicitly show the start state
         if event.type == PipelineEventType.TTS_START:
             _LOGGER.debug("TTS started, setting TTS entity to start state")
+            
+            # If this is a TTS_START event with follow-up information, store it in the registry
+            if event.data and "request_followup" in event.data:
+                follow_up_flag = event.data.get("request_followup", False)
+                if self.device_entry.id in OMNI_ASSIST_REGISTRY:
+                    OMNI_ASSIST_REGISTRY[self.device_entry.id]["request_followup"] = follow_up_flag
+                    _LOGGER.debug(f"Stored request_followup={follow_up_flag} in device registry")
+            
             self.hass.loop.call_soon_threadsafe(
                 async_dispatcher_send, self.hass, f"{self.uid}-tts", "start", event.data
             )
@@ -293,7 +316,8 @@ class OmniAssistSwitch(SwitchEntity):
         OMNI_ASSIST_REGISTRY[self.device_entry.id] = {
             "switch": self,
             "uid": self.uid,
-            "options": self.options.copy()
+            "options": self.options.copy(),
+            "request_followup": False  # Initialize follow-up flag
         }
         _LOGGER.debug(f"Registered device in OMNI_ASSIST_REGISTRY with ID: {self.device_entry.id}")
 

@@ -48,6 +48,10 @@ async def async_setup(hass: HomeAssistant, config: ConfigType):
                     conversation_id = device_data["last_conversation_id"]
                     _LOGGER.debug(f"Using last known conversation_id for device: {conversation_id}")
                 
+                # Store follow-up flag in the registry for thread-safe access
+                device_data["request_followup"] = request_followup
+                _LOGGER.debug(f"Stored request_followup={request_followup} in device registry")
+                
                 _LOGGER.debug(f"Running pipeline for device {device_id} with UID {device_data['uid']}")
             elif device_id:
                 _LOGGER.error(f"Device ID {device_id} not found in registry")

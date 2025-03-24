@@ -295,6 +295,10 @@ async def assist_run(
                     if device_uid:
                         running_event_data["device_uid"] = device_uid
                         
+                    # Include request_followup flag if it's set
+                    if request_followup:
+                        running_event_data["request_followup"] = request_followup
+                        
                     running_event = PipelineEvent(
                         "tts-running",
                         running_event_data
@@ -330,9 +334,8 @@ async def assist_run(
                             "request_followup": request_followup,
                         }
                         
-                        # Log follow-up request state
-                        if request_followup:
-                            _LOGGER.debug(f"Requesting follow-up after TTS playback (request_followup={request_followup})")
+                        # Log original follow-up flag value
+                        _LOGGER.debug(f"Using original request_followup={request_followup} in reset-after-tts event")
                         
                         # Only add conversation_id if it exists
                         if conversation_id:

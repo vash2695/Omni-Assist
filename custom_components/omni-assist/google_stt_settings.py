@@ -12,9 +12,9 @@ def get_google_stt_options() -> Dict[str, Any]:
     These settings help prevent premature stream termination.
     """
     return {
-        "singleUtterance": False,  # Crucial: Prevents early termination after a single utterance
-        "interimResults": True,    # Useful: Keeps connection active with partial results
-        "model": "default",        # Use default model 
+        "singleUtterance": False,
+        "interimResults": True,
+        "model": "default",
         "enableWordTimeOffsets": False,
         "maxAlternatives": 1,
     }

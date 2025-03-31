@@ -2,7 +2,20 @@
 
 # NOTE: I make changes to this frequently that may break things! Use at your own risk.
 
-This fork is an attempt at implementing continued conversation and other features within Stream Assist.
+This fork is an attempt at implementing continued conversation and other features within Stream Assist. It has undergone *significant* modification from its original state.
+
+My focus is on leveraging the most powerful models available for now, so local control is a secondary consideration. With that said, there should be no issue with using local resources with this integration, it will just be at the cost of latency and capability.
+
+In development, here are the integrations I have been using:
+Wake engine: porcupine1 - Has been more reliable than openwakeword for both recognition and false positives
+STT: Google cloud - Better timeout handling than HASS cloud. Still has it's issues, but attempting to work around with injection of custom settings
+LLM: OpenAI Extended Conversation - Most control over function calling
+TTS: ElevenLabs TTS - Best sounding and lowest latency provider to date
+
+And for incoming audio I am using a ThinkSmart Vue tablet running IPWebcam.
+
+Hardware in use: Lenovo laptop running HAOS, bare metal. Not super powerful, but much more headroom than a Raspberry Pi.
+
 
 Features added so far:
 * STT End media: Now both the start and end of the STT phase have options for audio feedback. Also added a field for this in the config options

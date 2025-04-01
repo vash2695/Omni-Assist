@@ -4,7 +4,10 @@ from typing import Any
 from homeassistant.components.select import SelectEntity
 from homeassistant.components.assist_pipeline import (
     async_get_pipelines,
-    pipeline_store,
+    # Import the specific function needed, not the internal store object
+    async_listen_for_updates,
+    # async_get_pipeline is used to get the default pipeline, keep this import
+    async_get_pipeline,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
@@ -50,7 +53,8 @@ class OmniAssistPipelineSelect(SelectEntity):
 
         # Store pipelines (id -> name)
         self._pipelines: dict[str, str] = {}
-        self._update_pipeline_options() # Initial population
+        # We will call _update_pipeline_options in async_added_to_hass
+        # self._update_pipeline_options() # Initial population deferred
 
         _LOGGER.debug(f"Initialized OmniAssistPipelineSelect: {self.unique_id}")
 
@@ -60,8 +64,10 @@ class OmniAssistPipelineSelect(SelectEntity):
         pipelines = async_get_pipelines(self.hass)
         self._pipelines = {p.id: p.name for p in pipelines}
         # Ensure default pipeline is included if available
-        if default_pipeline := pipeline_store.async_get_pipeline(self.hass, None):
+        # Use the imported async_get_pipeline function correctly
+        if default_pipeline := async_get_pipeline(self.hass, None):
              if default_pipeline.id not in self._pipelines:
+                  # Add default only if it has a specific ID and isn't already listed
                   self._pipelines[default_pipeline.id] = default_pipeline.name
 
         # Get list of pipeline names for the options attribute
@@ -77,12 +83,13 @@ class OmniAssistPipelineSelect(SelectEntity):
                  "is no longer available. Please select a valid pipeline."
              )
              # Add the invalid ID temporarily so it shows up until changed
-             pipeline_names.append(f"Invalid: {current_id}")
+             invalid_name = f"Invalid: {current_id[:8]}..." # Show partial ID
+             pipeline_names.append(invalid_name)
              # Store the invalid ID -> Name mapping too for reverse lookup
-             self._pipelines[current_id] = f"Invalid: {current_id}"
+             self._pipelines[current_id] = invalid_name
 
 
-        self._attr_options = pipeline_names
+        self._attr_options = sorted(pipeline_names) # Sort options alphabetically
         _LOGGER.debug(f"Updated pipeline options for {self.unique_id}: {self._attr_options}")
 
     @property
@@ -102,8 +109,8 @@ class OmniAssistPipelineSelect(SelectEntity):
                 selected_pipeline_id = pid
                 break
 
-        if selected_pipeline_id is None:
-            _LOGGER.error(f"Could not find pipeline ID for selected name: {option}")
+        if selected_pipeline_id is None or option.startswith("Invalid:"):
+            _LOGGER.error(f"Could not find valid pipeline ID for selected name: {option}")
             return
 
         _LOGGER.debug(f"Updating config entry options with pipeline_id: {selected_pipeline_id}")
@@ -120,8 +127,9 @@ class OmniAssistPipelineSelect(SelectEntity):
         """Run when entity about to be added to hass."""
         await super().async_added_to_hass()
         # Register a listener for pipeline changes to update options dynamically
+        # Use the directly imported function here
         self.async_on_remove(
-            pipeline_store.async_listen_for_updates(self.hass, self._handle_pipeline_update)
+            async_listen_for_updates(self.hass, self._handle_pipeline_update)
         )
         # Initial update after adding to hass
         self._update_pipeline_options()
@@ -131,4 +139,4 @@ class OmniAssistPipelineSelect(SelectEntity):
         """Handle updates to the pipeline store."""
         _LOGGER.debug(f"Pipeline store updated, refreshing options for {self.unique_id}")
         self._update_pipeline_options()
-        self.async_write_ha_state()
+        self.async_write_ha_state() # Update HA state after options change

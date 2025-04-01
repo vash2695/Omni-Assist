@@ -4,10 +4,12 @@ from typing import Any
 from homeassistant.components.select import SelectEntity
 from homeassistant.components.assist_pipeline import (
     async_get_pipelines,
-    # Import the specific function needed, not the internal store object
-    async_listen_for_updates,
-    # async_get_pipeline is used to get the default pipeline, keep this import
+    # We don't import the listener function directly
+    # async_get_pipeline is used to get the default pipeline
     async_get_pipeline,
+    # Import the DATA_STORE constant to access the store
+    DATA_STORE,
+    PipelineStorageCollection, # Import the type hint for the store if needed
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
@@ -28,6 +30,15 @@ async def async_setup_entry(
 ) -> None:
     """Set up Omni-Assist select entities from a config entry."""
     _LOGGER.debug(f"Setting up OmniAssist Select for entry {config_entry.entry_id}")
+
+    # Check if the pipeline store is available
+    if DATA_STORE not in hass.data:
+        _LOGGER.error("Assist pipeline store not initialized.")
+        # Optionally wait for it? Or just fail setup for select?
+        # For now, let entity setup proceed, it might become available later
+        # or log an error if needed during entity operation.
+        pass # Allow entity creation even if store isn't ready yet
+
     select_entity = OmniAssistPipelineSelect(config_entry)
     async_add_entities([select_entity])
 
@@ -61,14 +72,24 @@ class OmniAssistPipelineSelect(SelectEntity):
     @callback
     def _update_pipeline_options(self) -> None:
         """Update the available pipeline options."""
+        # Ensure hass is available before accessing pipelines
+        if not self.hass:
+            _LOGGER.warning(f"Hass object not available yet for {self.unique_id}, cannot update options.")
+            return
+
         pipelines = async_get_pipelines(self.hass)
-        self._pipelines = {p.id: p.name for p in pipelines}
+        new_pipelines_map = {p.id: p.name for p in pipelines}
         # Ensure default pipeline is included if available
-        # Use the imported async_get_pipeline function correctly
         if default_pipeline := async_get_pipeline(self.hass, None):
-             if default_pipeline.id not in self._pipelines:
-                  # Add default only if it has a specific ID and isn't already listed
-                  self._pipelines[default_pipeline.id] = default_pipeline.name
+             if default_pipeline.id not in new_pipelines_map:
+                  new_pipelines_map[default_pipeline.id] = default_pipeline.name
+
+        # Check if pipelines actually changed before updating state
+        if self._pipelines == new_pipelines_map:
+            _LOGGER.debug(f"Pipeline options unchanged for {self.unique_id}")
+            return
+
+        self._pipelines = new_pipelines_map
 
         # Get list of pipeline names for the options attribute
         pipeline_names = list(self._pipelines.values())
@@ -95,6 +116,10 @@ class OmniAssistPipelineSelect(SelectEntity):
     @property
     def current_option(self) -> str | None:
         """Return the currently selected pipeline name."""
+        # Ensure options are populated if not done yet
+        if not self._pipelines and self.hass:
+            self._update_pipeline_options()
+
         pipeline_id = self._config_entry.options.get(OPTION_PIPELINE)
         # Use the stored mapping to get the name from the ID
         return self._pipelines.get(pipeline_id)
@@ -121,22 +146,29 @@ class OmniAssistPipelineSelect(SelectEntity):
         self.hass.config_entries.async_update_entry(
             self._config_entry, options=new_options
         )
-        # No need to call schedule_update_ha_state, HA handles it for selects
+        # Update state immediately after changing option
+        self.async_write_ha_state()
+
 
     async def async_added_to_hass(self) -> None:
         """Run when entity about to be added to hass."""
         await super().async_added_to_hass()
-        # Register a listener for pipeline changes to update options dynamically
-        # Use the directly imported function here
-        self.async_on_remove(
-            async_listen_for_updates(self.hass, self._handle_pipeline_update)
-        )
-        # Initial update after adding to hass
+        # Register a listener for pipeline changes using the store object
+        if DATA_STORE in self.hass.data:
+            store: PipelineStorageCollection = self.hass.data[DATA_STORE]
+            self.async_on_remove(
+                store.async_add_listener(self._handle_pipeline_update)
+            )
+            _LOGGER.debug(f"Added listener to pipeline store for {self.unique_id}")
+        else:
+            _LOGGER.warning(f"Pipeline store not found in hass.data when adding {self.unique_id}. Options may not update dynamically.")
+
+        # Initial update after adding to hass and potentially connecting listener
         self._update_pipeline_options()
 
     @callback
     def _handle_pipeline_update(self) -> None:
         """Handle updates to the pipeline store."""
-        _LOGGER.debug(f"Pipeline store updated, refreshing options for {self.unique_id}")
+        _LOGGER.debug(f"Pipeline store updated signal received, refreshing options for {self.unique_id}")
         self._update_pipeline_options()
         self.async_write_ha_state() # Update HA state after options change

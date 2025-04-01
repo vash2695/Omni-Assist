@@ -14,9 +14,8 @@ from .core.stream import Stream
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = (Platform.SENSOR, Platform.SWITCH)
-
-# REMOVED: OMNI_ASSIST_REGISTRY = {} - Will use hass.data[DOMAIN] instead
+# Add Platform.SELECT here
+PLATFORMS = (Platform.SENSOR, Platform.SWITCH, Platform.SELECT)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType):
@@ -166,14 +165,27 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     # Ensure hass.data[DOMAIN] exists (redundant if async_setup ran, but safe)
     hass.data.setdefault(DOMAIN, {})
 
-    if config_entry.data:
-        hass.config_entries.async_update_entry(
-            config_entry, data={}, options=config_entry.data
-        )
+    # Migrate data to options if empty (assuming this runs only once on first setup)
+    # This ensures options are populated even if user skips options flow initially
+    if not config_entry.options and config_entry.data:
+         _LOGGER.debug(f"Migrating data to options for entry {config_entry.entry_id}")
+         hass.config_entries.async_update_entry(
+             config_entry, data={}, options=config_entry.data
+         )
+    elif not config_entry.options:
+         _LOGGER.warning(f"Config entry {config_entry.entry_id} has no options, using defaults.")
+         # If data is also empty, initialize options with empty dict or defaults?
+         # Using empty dict for now.
+         hass.config_entries.async_update_entry(
+             config_entry, options={}
+         )
 
+
+    # Ensure update listener is attached
     if not config_entry.update_listeners:
-        config_entry.add_update_listener(async_update_options)
+         config_entry.add_update_listener(async_update_options)
 
+    # Forward setup to all platforms defined in PLATFORMS tuple
     await hass.config_entries.async_forward_entry_setups(config_entry, PLATFORMS)
 
     return True
@@ -181,7 +193,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
 
 async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     """Unload a config entry."""
-    # Forward unload to platforms
+    # Forward unload to all platforms defined in PLATFORMS tuple
     unload_ok = await hass.config_entries.async_unload_platforms(config_entry, PLATFORMS)
 
     # Remove device from registry if it exists
@@ -199,6 +211,7 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry):
 
 async def async_update_options(hass: HomeAssistant, config_entry: ConfigEntry):
     """Handle options update."""
+    _LOGGER.debug(f"Reloading config entry {config_entry.entry_id} due to options update.")
     await hass.config_entries.async_reload(config_entry.entry_id)
 
 
@@ -214,4 +227,5 @@ async def async_remove_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
     """Handle removal of a config entry."""
     # This is called after async_unload_entry when the entry is fully removed.
     # Perform any final cleanup if needed.
+    _LOGGER.debug(f"Config entry {config_entry.entry_id} fully removed.")
     pass
